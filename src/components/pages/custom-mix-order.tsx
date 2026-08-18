@@ -1,0 +1,2001 @@
+"use client";
+
+import { useState, useMemo, useCallback, useEffect } from "react";
+import {
+  FlaskConical,
+  Plus,
+  Trash2,
+  RotateCcw,
+  CheckCircle2,
+  Search,
+  Download,
+  Scale,
+  Receipt,
+  Loader2,
+  Printer,
+  ChevronLeft,
+  ChevronRight,
+  Pencil,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useMixStore, fetchCached, invalidateCache, apiError } from "@/store";
+import { PageHeader, MetricCard } from "@/components/shared/page-header";
+import { QuickNav } from "@/components/shared/quick-nav";
+import type { MixIngredient, Product } from "@/types";
+import { LocationSelect } from "@/components/shared/location-select";
+import { AvailableStock } from "@/components/shared/available-stock";
+import ConfirmAction from "@/components/shared/confirm-action";
+import { generateMixBillPDF } from "@/lib/generate-mix-bill";
+import { numberToRupeeWords } from "@/lib/number-to-words";
+
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
+import { shareBillOnWhatsApp } from "@/lib/share-whatsapp";
+import { showWhatsAppShareToast } from "@/components/share-whatsapp-toast";
+import { pktToday } from "@/lib/pkt-date";
+import { useMixOrdersPaginated, useInvalidateAfterMutation, useCustomers } from "@/hooks/queries";
+import { downloadExcel } from "@/lib/download-excel";
+
+const PAST_PAGE_SIZE = 10;
+
+/* ─── Helpers ─── */
+function fmtRs(n: number) {
+  return n.toLocaleString("en-PK");
+}
+
+function printMixBill(order: { id: string | number; customer: string; date: string; driverName?: string; driverRent?: number }, items: { product: string; weight_kg: number; rate_per_kg: number; amount: number; bags?: number | null; rate_per_bag?: number | null; bag_amount?: number | null; rate_basis_weight?: number | null; quoted_rate?: number | null }[], totalWeight: number, totalAmount: number, totalBagAmount: number = 0) {
+  const hasBagInfo = items.some((i) => (i.bags && i.bags > 0) || (i.rate_per_bag && i.rate_per_bag > 0));
+  // New unit-based pricing — if any item has rate_basis_weight + quoted_rate,
+  // the table shows a "Quoted Rate" column (Rs. X / Y kg) instead of "Rate".
+  const hasQuotedRates = items.some((i) => i.rate_basis_weight != null && i.quoted_rate != null);
+
+  const rateCell = (it: any) => {
+    if (hasQuotedRates && it.quoted_rate != null && it.rate_basis_weight != null) {
+      return `Rs. ${it.quoted_rate.toLocaleString("en-PK")} / ${it.rate_basis_weight}kg`;
+    }
+    return it.rate_per_kg;
+  };
+
+  const rows = items.map((it, i) => hasBagInfo
+    ? `<tr>
+      <td>${i + 1}</td><td>${it.product}</td>
+      <td style="text-align:right">${it.weight_kg}</td>
+      <td style="text-align:right">${it.rate_per_kg}</td>
+      <td style="text-align:right">${it.amount.toLocaleString("en-PK")}</td>
+      <td style="text-align:right">${it.bags ?? "—"}</td>
+      <td style="text-align:right">${it.rate_per_bag ?? "—"}</td>
+      <td style="text-align:right">${it.bag_amount ? it.bag_amount.toLocaleString("en-PK") : "—"}</td>
+    </tr>`
+    : `<tr>
+      <td>${i + 1}</td><td>${it.product}</td>
+      <td style="text-align:right">${it.weight_kg}</td>
+      <td style="text-align:right">${rateCell(it)}</td>
+      <td style="text-align:right">${it.amount.toLocaleString("en-PK")}</td>
+    </tr>`).join("");
+
+  const driverLine = order.driverName
+    ? `<div class="info-row"><span>Driver:</span><strong>${order.driverName}</strong></div>${order.driverRent && order.driverRent > 0 ? `<div class="info-row"><span>Driver Rent:</span><strong>Rs. ${order.driverRent.toLocaleString("en-PK")}</strong></div>` : ""}`
+    : "";
+
+  const bagHead = hasBagInfo ? `<th style="text-align:right">Bags</th><th style="text-align:right">Rate/Bag</th><th style="text-align:right">Bag Amt</th>` : "";
+  const bagFoot = hasBagInfo ? `<td style="text-align:right">${totalBagAmount > 0 ? totalBagAmount.toLocaleString("en-PK") : ""}</td><td></td><td></td>` : "";
+  const rateHeadLabel = hasQuotedRates ? "Quoted Rate" : "Rate";
+
+  const grandTotal = totalAmount + (order.driverRent && order.driverRent > 0 ? order.driverRent : 0);
+
+  // As Rate/Bag — Subtotal (excluding driver rent) divided by total bags.
+  // Total bags per ingredient: use explicit `bags` if entered, else
+  // auto-derive from kg (40 kg = 1 bag).
+  const BAG_KG = 40;
+  const totalBagsCount = items.reduce(
+    (sum, i) => sum + (i.bags && i.bags > 0 ? i.bags : i.weight_kg / BAG_KG),
+    0,
+  );
+  const hasAsRatePerBag = totalBagsCount > 0;
+  const asRatePerBag = hasAsRatePerBag ? totalAmount / totalBagsCount : 0;
+  const asRatePerBagLine = hasAsRatePerBag
+    ? `<div class="trow"><span>As Rate/Bag (${totalBagsCount.toLocaleString("en-PK", { maximumFractionDigits: 2 })} bags):</span><strong>Rs. ${asRatePerBag.toLocaleString("en-PK", { maximumFractionDigits: 2 })}</strong></div>`
+    : "";
+
+  const html = `<!DOCTYPE html><html><head><style>
+    @page{size:auto;margin:5mm}
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Courier New',monospace;max-width:280px;margin:0 auto;padding:8px;color:#000;font-size:10px}
+    .top-line{height:3px;background:#f5c438;margin-bottom:4px}
+    .farm-banner{text-align:center;padding:6px 4px;border-bottom:2px solid #085039;margin-bottom:6px}
+    .farm-banner h1{font-size:19px;font-weight:bold;letter-spacing:1.5px;color:#085039}
+    .farm-banner .tag{font-size:9px;font-style:italic;color:#666;margin-top:1px}
+    .farm-banner .addr{font-size:7.5px;color:#888;margin-top:1px}
+    .inv-label{text-align:center;background:#085039;color:#f5c438;font-size:9px;font-weight:bold;letter-spacing:1px;padding:2px;margin-bottom:6px}
+    .meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px}
+    .meta-box{border:1px solid #085039;border-radius:2px;padding:4px;background:#fcfcfc}
+    .meta-box .title{font-size:7px;color:#085039;font-weight:bold;letter-spacing:0.5px;border-bottom:1px solid #ccc;padding-bottom:2px;margin-bottom:2px}
+    .meta-box .row{display:flex;justify-content:space-between;font-size:8.5px;margin-bottom:1px}
+    .meta-box .row span:first-child{color:#666}
+    .meta-box .row strong{font-weight:bold;color:#000}
+    table{width:100%;border-collapse:collapse;margin:4px 0}
+    th,td{padding:3px 4px;font-size:9px}
+    th{background:#085039;color:#fff;text-align:left;border-bottom:1px solid #f5c438;font-weight:bold;font-size:8.5px}
+    td{border-bottom:1px dotted #ddd}
+    .total-row{font-weight:bold;border-top:2px solid #085039;border-bottom:none !important;background:#fcf7e8;color:#085039}
+    .totals-box{margin-top:6px;border:1.5px solid #085039;border-radius:2px;background:#fcfcfc}
+    .totals-box .trow{display:flex;justify-content:space-between;padding:3px 6px;font-size:9px;border-bottom:1px dotted #ddd}
+    .totals-box .trow.grand{background:#085039;color:#fff;font-size:11px;font-weight:bold;border-bottom:none;padding:5px 6px}
+    .totals-box .trow span:first-child{color:#666}
+    .totals-box .trow.grand span:first-child{color:#fff}
+    .words{font-size:7.5px;font-style:italic;color:#666;padding:2px 6px;text-align:left}
+    .tc-box{margin-top:8px;border:1px solid #085039;border-radius:2px;background:#fcf7e8;padding:4px;position:relative}
+    .tc-box::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:#085039;border-radius:2px 0 0 2px}
+    .tc-title{font-size:7.5px;font-weight:bold;color:#085039;letter-spacing:0.5px;margin-bottom:2px;padding-left:4px}
+    .tc-list{font-size:6.5px;color:#666;line-height:1.4;padding-left:4px}
+    .sig{margin-top:12px;display:flex;justify-content:space-between;align-items:flex-end}
+    .sig-line{border-top:1px solid #444;width:55%;text-align:center;padding-top:2px;font-size:8px;color:#444}
+    .stamp{width:40px;height:40px;border:1.5px solid #085039;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:6px;font-weight:bold;color:#085039;text-align:center;line-height:1.2;position:relative}
+    .stamp::after{content:'';position:absolute;inset:3px;border:0.5px solid #f5c438;border-radius:50%}
+    .footer{margin-top:10px;border-top:2px solid #085039;padding-top:5px;text-align:center}
+    .footer .dev{font-size:10px;font-weight:bold;color:#085039;letter-spacing:0.5px}
+    .footer .contact{font-size:9px;color:#444;margin-top:1px}
+    .footer .meta{font-size:6.5px;color:#aaa;margin-top:3px}
+    .bottom-line{height:2px;background:#f5c438;margin-top:4px}
+  </style></head><body>
+    <div class="top-line"></div>
+    <div class="farm-banner">
+      <h1>DANISH CATTLE FEED</h1>
+      <div class="tag">Cattle Feed Supplier</div>
+      <div class="addr">Farm: Dry port phatak Faisalabad &nbsp;|&nbsp; Shop: Madni kholoni shamsabad jhumra road &nbsp;|&nbsp; 0300-3966715</div>
+    </div>
+    <div class="inv-label">MIX ORDER INVOICE</div>
+    <div class="meta-grid">
+      <div class="meta-box">
+        <div class="title">BILL TO</div>
+        <div class="row"><span>Customer:</span><strong>${order.customer?.slice(0, 16) || "N/A"}</strong></div>
+        <div class="row"><span>Driver:</span><strong>${order.driverName?.slice(0, 16) || "—"}</strong></div>
+      </div>
+      <div class="meta-box">
+        <div class="title">INVOICE</div>
+        <div class="row"><span>Bill #</span><strong>${order.id}</strong></div>
+        <div class="row"><span>Date</span><strong>${order.date}</strong></div>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>Item</th><th style="text-align:right">Wt(kg)</th><th style="text-align:right">${rateHeadLabel}</th><th style="text-align:right">Amt</th>${bagHead}</tr></thead>
+      <tbody>${rows}
+        <tr class="total-row"><td colspan="2">TOTAL</td><td style="text-align:right">${fmtRs(totalWeight)} kg</td><td></td><td style="text-align:right">Rs. ${fmtRs(totalAmount)}</td>${bagFoot}</tr>
+      </tbody>
+    </table>
+    <div class="totals-box">
+      <div class="trow"><span>Subtotal:</span><strong>Rs. ${fmtRs(totalAmount)}</strong></div>
+      ${asRatePerBagLine}
+      ${order.driverRent && order.driverRent > 0 ? `<div class="trow"><span>Driver Rent:</span><strong>Rs. ${fmtRs(order.driverRent)}</strong></div>` : ""}
+      <div class="trow grand"><span>GRAND TOTAL:</span><span>Rs. ${fmtRs(grandTotal)}</span></div>
+      <div class="words">In words: ${numberToRupeeWords(grandTotal)}</div>
+    </div>
+    <div class="tc-box">
+      <div class="tc-title">TERMS &amp; CONDITIONS</div>
+      <div class="tc-list">
+        1. Goods once sold will not be returned or exchanged.<br/>
+        2. All disputes subject to Faisalabad jurisdiction.<br/>
+        3. Please verify bill details at the time of delivery.
+      </div>
+    </div>
+    <div class="sig">
+      <div class="stamp"><span>DANISH</span><span>CATTLE FEED</span><span>★ FSD ★</span></div>
+      <div class="sig-line">For Danish Cattle Feed<br/>Authorised Signatory</div>
+    </div>
+    <div class="footer">
+      <div class="dev">Software By: Shahid ALI</div>
+      <div class="contact">Contact: 03271487858</div>
+      <div class="meta">Computer-generated invoice &nbsp;•&nbsp; ${new Date().toLocaleString("en-PK")}</div>
+    </div>
+    <div class="bottom-line"></div>
+  </body></html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.left = "-9999px";
+  iframe.style.top = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) { document.body.removeChild(iframe); return; }
+  doc.open();
+  doc.write(html);
+  doc.close();
+  iframe.contentWindow?.focus();
+  iframe.contentWindow?.print();
+  setTimeout(() => document.body.removeChild(iframe), 1000);
+}
+
+const today = pktToday();
+
+/* ─── Component ─── */
+export default function CustomMixOrder() {
+  const store = useMixStore();
+  const isBuilding = store.targetWeight !== null;
+
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  // Bumped after every successful mix order save so the <AvailableStock>
+  // panel knows to refetch stock automatically (mix orders decrement stock
+  // just like regular sales).
+  const [stockRefreshTrigger, setStockRefreshTrigger] = useState(0);
+
+  /* ── State 1 form ── */
+  const [s1Name, setS1Name] = useState("");
+  const [s1Type, setS1Type] = useState<"credit" | "cash">("credit");
+  const [s1Date, setS1Date] = useState(today);
+  const [s1Target, setS1Target] = useState("");
+  const [s1LocationId, setS1LocationId] = useState<number>(2); // default Shop
+  // Driver fields (optional) — order level
+  const [s1DriverName, setS1DriverName] = useState("");
+  const [s1DriverRent, setS1DriverRent] = useState("");
+
+  /* ── Customer search (for picking an existing customer by name) ──
+     The "Customer Name" field stays free-text (you can still type a new
+     name), but now it also shows a live dropdown of existing customers
+     matching what you've typed. Clicking a suggestion fills the field. */
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [showCustomerResults, setShowCustomerResults] = useState(false);
+  const { data: customersData } = useCustomers(true); // active customers only
+  const customers = customersData?.customers ?? [];
+
+  // Live filtered list — matches name OR phone, case-insensitive
+  const filteredCustomers = useMemo(() => {
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return customers;
+    return customers.filter(
+      (c: any) =>
+        c.name?.toLowerCase().includes(q) ||
+        (c.phone && String(c.phone).toLowerCase().includes(q))
+    );
+  }, [customerSearch, customers]);
+
+  /* ── State 2 form ── */
+  const [addProduct, setAddProduct] = useState<string>("");
+  const [addWeight, setAddWeight] = useState("");
+  // Quoted rate (PKR) — the price charged for one `rate_basis_weight` unit.
+  const [addRate, setAddRate] = useState("");
+  // Rate basis weight (kg) — the reference unit the quoted rate applies to.
+  // Default 40 keeps the legacy 40 kg/bag convention; user can change to 1
+  // for true per-kg pricing or any other reference weight.
+  const [addRateBasis, setAddRateBasis] = useState<string>("40");
+  const [cashReceived, setCashReceived] = useState("");
+
+  /* ── Live preview: Total Amount = (total_weight / rate_basis) × quoted_rate ── */
+  const liveTotalAmount = useMemo(() => {
+    const w = Number(addWeight);
+    const b = Number(addRateBasis);
+    const r = Number(addRate);
+    if (!w || w <= 0 || !b || b <= 0 || !r || r <= 0) return 0;
+    return (w / b) * r;
+  }, [addWeight, addRateBasis, addRate]);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const failed: string[] = [];
+      try { setProducts(await fetchCached<Product>("products", "/api/products?active=true", "products")); }
+      catch { failed.push("products"); }
+      if (failed.length > 0) toast.error(`Failed to load: ${failed.join(", ")}`);
+      setLoading(false);
+    })();
+  }, []);
+
+  /* ── Past orders (paginated + server-side search) ── */
+  const [pastSearchInput, setPastSearchInput] = useState("");
+  const [pastSearchDebounced, setPastSearchDebounced] = useState("");
+  const [pastPage, setPastPage] = useState(1);
+  const [selectedPastId, setSelectedPastId] = useState<string | null>(null);
+
+  /* ── Edit / Delete dialog state ── */
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteSaving, setDeleteSaving] = useState(false);
+
+  // Debounce past-order search (350ms) + reset to page 1 on new search
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setPastSearchDebounced(pastSearchInput);
+      setPastPage(1);
+      setSelectedPastId(null);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [pastSearchInput]);
+
+  const pastQ = useMixOrdersPaginated(
+    { search: pastSearchDebounced },
+    pastPage,
+    PAST_PAGE_SIZE,
+  );
+  const invalidate = useInvalidateAfterMutation();
+
+  // Flatten paginated orders + attach sales lines from salesByMix
+  const pastOrders: any[] = useMemo(() => {
+    const orders = pastQ.data?.orders ?? [];
+    const salesByMix: Record<number, any[]> = pastQ.data?.salesByMix ?? {};
+    return orders.map((o: any) => ({
+      ...o,
+      customer: o.customers?.name ?? "",
+      date: o.order_date ?? "",
+      driverName: o.driver_name ?? "",
+      driverRent: o.driver_rent ?? 0,
+      sales: salesByMix[o.id] ?? [],
+    }));
+  }, [pastQ.data]);
+
+  const selectedPast = pastOrders.find((o) => o.id === selectedPastId) ?? null;
+
+  // Refresh past orders after a new mix-order is saved
+  const reloadPastOrders = useCallback(() => {
+    invalidate.invalidateMixOrders();
+  }, [invalidate]);
+
+  /* ── Delete selected mix order ── */
+  const handleDeleteMixOrder = useCallback(() => {
+    if (!selectedPast) return;
+    setDeleteSaving(true);
+    fetch(`/api/mix-orders?id=${selectedPast.id}`, { method: "DELETE" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await apiError(res, "Failed to delete mix order"));
+        toast.success(`Mix Order #${selectedPast.id} delete ho gaya`);
+        setSelectedPastId(null);
+        invalidateCache("stock");
+        setStockRefreshTrigger((n) => n + 1);
+        reloadPastOrders();
+      })
+      .catch((e: any) => toast.error(e.message || "Delete nahi hua"))
+      .finally(() => {
+        setDeleteSaving(false);
+        setDeleteOpen(false);
+      });
+  }, [selectedPast, reloadPastOrders]);
+
+  /* ── Update (edit) selected mix order ──
+     Called from <EditMixOrderDialog> after the user saves changes. */
+  const handleUpdateMixOrder = useCallback(
+    async (payload: {
+      customer_id: number;
+      order_date: string;
+      target_weight_kg: number | null;
+      cash_received: number;
+      driver_name: string | null;
+      driver_rent: number;
+      location_id: number | null;
+      items: {
+        product_id: number;
+        quantity: number;
+        rate_per_kg: number;
+        rate_basis_weight?: number | null;
+        quoted_rate?: number | null;
+      }[];
+    }) => {
+      if (!selectedPast) return;
+      setEditSaving(true);
+      try {
+        const res = await fetch("/api/mix-orders", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: selectedPast.id, ...payload }),
+        });
+        if (!res.ok) throw new Error(await apiError(res, "Failed to update mix order"));
+        toast.success(`Mix Order #${selectedPast.id} update ho gaya`);
+        setEditOpen(false);
+        invalidateCache("stock");
+        setStockRefreshTrigger((n) => n + 1);
+        reloadPastOrders();
+      } catch (e: any) {
+        toast.error(e.message || "Update nahi hua");
+      } finally {
+        setEditSaving(false);
+      }
+    },
+    [selectedPast, reloadPastOrders],
+  );
+
+  // ── Download ALL past mix-orders as Excel ──
+  // Walks paginated /api/mix-orders (no search filter = every record)
+  // and produces a single .xlsx workbook with one row per mix order line.
+  const [downloadingPastExcel, setDownloadingPastExcel] = useState(false);
+  const handleDownloadPastExcel = async () => {
+    setDownloadingPastExcel(true);
+    try {
+      const all: Record<string, any>[] = [];
+      let page = 1;
+      let totalPages = 1;
+      while (page <= totalPages) {
+        const qs = new URLSearchParams({
+          page: String(page),
+          pageSize: "200",
+        });
+        const res = await fetch(`/api/mix-orders?${qs.toString()}`);
+        if (!res.ok) throw new Error("Failed to fetch mix orders");
+        const body = await res.json();
+        const orders: any[] = Array.isArray(body?.orders) ? body.orders : [];
+        const salesByMix: Record<string, any[]> = body?.salesByMix ?? {};
+        // Flatten: one row per sale line inside each mix order
+        for (const o of orders) {
+          const lines = salesByMix[o.id] ?? [];
+          if (lines.length === 0) {
+            // Mix order with no sale lines (rare) — emit a single row
+            all.push({
+              order_id: o.id,
+              order_date: o.order_date,
+              customer: o.customers?.name ?? "—",
+              target_weight_kg: o.target_weight_kg ?? "",
+              cash_received: o.cash_received ?? 0,
+              driver_name: o.driver_name ?? "",
+              driver_rent: o.driver_rent ?? 0,
+              product: "—",
+              quantity: "",
+              rate_per_kg: "",
+              line_amount: "",
+            });
+          } else {
+            for (const line of lines) {
+              all.push({
+                order_id: o.id,
+                order_date: o.order_date,
+                customer: o.customers?.name ?? "—",
+                target_weight_kg: o.target_weight_kg ?? "",
+                cash_received: o.cash_received ?? 0,
+                driver_name: o.driver_name ?? "",
+                driver_rent: o.driver_rent ?? 0,
+                product: line.products?.name ?? "—",
+                quantity: line.quantity,
+                rate_per_kg: line.rate_per_bag,
+                line_amount: (Number(line.quantity) || 0) * (Number(line.rate_per_bag) || 0),
+              });
+            }
+          }
+        }
+        totalPages = typeof body?.totalPages === "number" ? body.totalPages : 1;
+        if (orders.length === 0) break;
+        page += 1;
+      }
+      if (all.length === 0) {
+        toast.error("No mix orders to download");
+        return;
+      }
+      await downloadExcel(all, [
+        { key: "order_id", label: "Order ID" },
+        { key: "order_date", label: "Date" },
+        { key: "customer", label: "Customer" },
+        { key: "target_weight_kg", label: "Target Weight (kg)", align: "right" },
+        { key: "product", label: "Ingredient" },
+        { key: "quantity", label: "Qty (kg)", align: "right" },
+        { key: "rate_per_kg", label: "Rate/kg", align: "right" },
+        { key: "line_amount", label: "Line Amount (Rs.)", align: "right" },
+        { key: "cash_received", label: "Cash Received (Rs.)", align: "right" },
+        { key: "driver_name", label: "Driver Name" },
+        { key: "driver_rent", label: "Driver Rent (Rs.)", align: "right" },
+      ], "all-mix-orders");
+      toast.success(`Mix orders Excel downloaded (${all.length} line items)`);
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to download Excel");
+    } finally {
+      setDownloadingPastExcel(false);
+    }
+  };
+
+  const usedWeight = store.getUsedWeight();
+  const totalAmount = store.getTotalAmount();
+  const totalBagAmount = store.getTotalBagAmount();
+  const remaining = (store.targetWeight ?? 0) - usedWeight;
+
+  /* ── Handlers ── */
+  const handleStartOrder = useCallback(() => {
+    const target = Number(s1Target);
+    if (!s1Name.trim()) {
+      toast.error("Customer name is required");
+      return;
+    }
+    if (!target || target <= 0) {
+      toast.error("Enter a valid target weight");
+      return;
+    }
+    const driverName = s1DriverName.trim();
+    const driverRentNum = Number(s1DriverRent) || 0;
+    store.startOrder(s1Name.trim(), s1Type, s1Date, target, {
+      driverName,
+      driverRent: driverRentNum,
+      locationId: s1LocationId,
+    });
+    toast.success("Mix order started — add ingredients below");
+  }, [s1Name, s1Type, s1Date, s1Target, s1DriverName, s1DriverRent, s1LocationId, store]);
+
+  const handleAddIngredient = useCallback(() => {
+    if (!addProduct) {
+      toast.error("Select a product");
+      return;
+    }
+    const weight = Number(addWeight);
+    const rateBasis = Number(addRateBasis);
+    const quotedRate = Number(addRate);
+    if (!weight || weight <= 0) {
+      toast.error("Enter a valid total weight");
+      return;
+    }
+    if (!rateBasis || rateBasis <= 0) {
+      toast.error("Enter a valid rate basis weight (e.g. 40 for per 40 kg, 1 for per kg)");
+      return;
+    }
+    if (!quotedRate || quotedRate <= 0) {
+      toast.error("Enter a valid quoted rate");
+      return;
+    }
+    const product = products.find((p) => p.id === Number(addProduct));
+    if (!product) return;
+
+    // ── New unit-based pricing (owner upgrade, Aug 2026) ──
+    // total_amount = (total_weight / rate_basis_weight) × quoted_rate
+    // rate_per_kg = quoted_rate / rate_basis_weight  (so backend's
+    //   `quantity × rate_per_kg` produces the same total amount).
+    //
+    // Legacy bag fields (bags / rate_per_bag / bag_amount) are left null —
+    // the PDF bill still auto-derives "As Rate/Bag" from kg at 40 kg/bag
+    // as a derived metric, but no manual bag entry happens anymore.
+    const totalAmount = (weight / rateBasis) * quotedRate;
+    const effectiveRatePerKg = quotedRate / rateBasis;
+
+    const ing: MixIngredient = {
+      product: product.name,
+      product_id: product.id,
+      weight_kg: weight,
+      rate_per_kg: effectiveRatePerKg,
+      amount: totalAmount,
+      rate_basis_weight: rateBasis,
+      quoted_rate: quotedRate,
+      bags: null,
+      rate_per_bag: null,
+      bag_amount: null,
+    };
+    store.addIngredient(ing);
+    setAddProduct("");
+    setAddWeight("");
+    setAddRate("");
+    // Keep the rate basis weight across ingredients — most owners quote
+    // multiple ingredients on the same basis (e.g. all per 40 kg).
+    toast.success(`${product.name} added to mix`);
+  }, [addProduct, addWeight, addRate, addRateBasis, store, products]);
+
+  const handleFinishOrder = useCallback(async () => {
+    if (store.ingredients.length === 0) {
+      toast.error("Add at least one ingredient before finishing");
+      return;
+    }
+    if (store.customerType === "cash") {
+      const cash = Number(cashReceived);
+      if (!cash || cash < 0) {
+        toast.error("Enter cash received amount");
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      // Find or create customer to get customer_id (same pattern as daily-entry)
+      let customerId: number;
+      const existingCustomer = await fetchCached<any>("customers", "/api/customers", "customers");
+      const match = existingCustomer.find(
+        (c: any) => c.name.toLowerCase() === store.customerName.trim().toLowerCase()
+      );
+      if (match) {
+        customerId = match.id;
+      } else {
+        const custRes = await fetch("/api/customers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: store.customerName.trim(), type: store.customerType }),
+        });
+        if (!custRes.ok) throw new Error(await apiError(custRes, "Failed to create customer"));
+        const custData = await custRes.json();
+        // Accept both shapes: { id, ... } (raw row) and { customer: { id, ... } } (wrapped)
+        customerId = custData?.id ?? custData?.customer?.id;
+        if (!customerId) throw new Error("Customer creation returned no ID");
+        invalidateCache("customers");
+      }
+
+      const res = await fetch("/api/mix-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customer_id: customerId,
+          order_date: store.orderDate,
+          target_weight_kg: store.targetWeight,
+          items: store.ingredients.map((ing) => ({
+            product_id: ing.product_id,
+            quantity: ing.weight_kg,
+            rate_per_kg: ing.rate_per_kg,
+            // Audit fields (owner upgrade, Aug 2026) — persisted on the
+            // sales row so historical mix orders retain their original
+            // quote (rate_basis_weight + quoted_rate). Nullable for
+            // backward-compat with older ingredients lacking these.
+            rate_basis_weight: ing.rate_basis_weight ?? null,
+            quoted_rate: ing.quoted_rate ?? null,
+          })),
+          cash_received: store.customerType === "cash" ? Number(cashReceived) || 0 : 0,
+          driver_name: store.driverName || null,
+          driver_rent: store.driverRent || 0,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || err.error || "Failed to save mix order");
+      }
+      // Generate PDF bill BEFORE resetting store
+      const billData = {
+        orderId: `mix-${Date.now()}`,
+        customerName: store.customerName,
+        customerType: store.customerType as "credit" | "cash",
+        orderDate: store.orderDate,
+        items: store.ingredients.map(i => ({
+          product: i.product,
+          weight_kg: i.weight_kg,
+          rate_per_kg: i.rate_per_kg,
+          amount: i.amount,
+          bags: i.bags ?? null,
+          rate_per_bag: i.rate_per_bag ?? null,
+          bag_amount: i.bag_amount ?? null,
+          // Pass quoted rate + basis so the PDF table shows
+          // "Quoted Rate (Rs. X / Y kg)" instead of "Rate / kg".
+          rate_basis_weight: i.rate_basis_weight ?? null,
+          quoted_rate: i.quoted_rate ?? null,
+        })),
+        totalWeight: store.targetWeight!,
+        totalAmount: totalAmount,
+        totalBagAmount: store.getTotalBagAmount(),
+        cashReceived: store.customerType === "cash" ? Number(cashReceived) || 0 : undefined,
+        driverName: store.driverName || null,
+        driverRent: store.driverRent || 0,
+      };
+      store.reset();
+      generateMixBillPDF(billData)
+        .then((billResult) => {
+          toast.success("Order finished! Bill PDF download ho rahi hai.", {
+            description: "Share on WhatsApp with the client?",
+            action: {
+              label: "Share on WhatsApp",
+              onClick: () => {
+                const result = shareBillOnWhatsApp(billResult);
+                showWhatsAppShareToast(result);
+              },
+            },
+            duration: 12000,
+          });
+        })
+        .catch(() => toast.error("PDF bill generate nahi ho saki"));
+      setCashReceived("");
+      setAddProduct("");
+      setAddWeight("");
+      setAddRate("");
+      setAddRateBasis("40");
+      setS1Name("");
+      setCustomerSearch("");
+      setShowCustomerResults(false);
+      setS1Type("credit");
+      setS1Date(today);
+      setS1Target("");
+      setS1DriverName("");
+      setS1DriverRent("");
+      invalidateCache("stock");
+      // Bump the trigger so the <AvailableStock> panel refetches stock
+      // and the displayed values reflect the just-saved mix order.
+      setStockRefreshTrigger((n) => n + 1);
+      await reloadPastOrders();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to save mix order");
+    } finally {
+      setSaving(false);
+    }
+  }, [store, cashReceived, reloadPastOrders, totalAmount]);
+
+  const handleCancel = useCallback(() => {
+    store.reset();
+    setCashReceived("");
+    setAddProduct("");
+    setAddWeight("");
+    setAddRate("");
+    setAddRateBasis("40");
+    toast.info("Order cancelled");
+  }, [store]);
+
+  /* ─────────────────────────────── STATE 1 ─────────────────────────────── */
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="size-8 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (!isBuilding) {
+    return (
+      <div className="min-h-screen bg-slate-100">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8">
+          <PageHeader
+            title="Custom Mix Order"
+            subtitle="Build a custom cattle feed mix bill with multiple ingredients"
+          />
+
+          {/* Live stock panel — shown at the top so the user can see what's
+              available before starting a mix order. Auto-refreshes when a
+              mix order is saved (stockRefreshTrigger bumps). */}
+          <AvailableStock refreshTrigger={stockRefreshTrigger} />
+
+          <QuickNav
+            title="Jump to"
+            items={[
+              { id: "section-new-order", label: "New Mix Order", icon: FlaskConical, iconColor: "text-emerald-600" },
+              ...(store.targetWeight ? [
+                { id: "section-metrics", label: "Mix Metrics", icon: Scale },
+                { id: "section-ingredient", label: "Add Ingredient", icon: Plus },
+                { id: "section-current-mix", label: "Current Mix", icon: Receipt },
+              ] : []),
+              { id: "section-past", label: "Past Mix Orders", icon: Receipt, iconColor: "text-slate-600" },
+            ]}
+          />
+
+          {/* Start New Order Form */}
+          <div id="section-new-order" className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6 space-y-6 scroll-mt-24">
+            <div className="flex items-center gap-2 mb-1">
+              <FlaskConical className="w-5 h-5 text-slate-500" />
+              <h2 className="text-base font-bold text-slate-800">
+                Start a New Mix Order
+              </h2>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="customer-name" className="text-slate-600">
+                Customer Name
+              </Label>
+              <div className="relative max-w-md">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
+                <Input
+                  id="customer-name"
+                  placeholder="Search Customer"
+                  value={customerSearch}
+                  onChange={(e) => {
+                    setCustomerSearch(e.target.value);
+                    setS1Name(e.target.value); // keep s1Name in sync so free-typed new names still work
+                    setShowCustomerResults(true);
+                  }}
+                  onFocus={() => setShowCustomerResults(true)}
+                  onBlur={() => {
+                    // Delay hide so click-on-suggestion can fire before the dropdown closes
+                    setTimeout(() => setShowCustomerResults(false), 200);
+                  }}
+                  className="pl-9"
+                  autoComplete="off"
+                />
+                {customerSearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomerSearch("");
+                      setS1Name("");
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 px-1"
+                    aria-label="Clear"
+                  >
+                    ✕
+                  </button>
+                )}
+
+                {/* Live results dropdown */}
+                {showCustomerResults && customerSearch.trim() && (
+                  <div className="absolute z-30 mt-1 w-full bg-white rounded-md border border-slate-200 shadow-sm divide-y divide-slate-100 max-h-60 overflow-y-auto">
+                    {filteredCustomers.length === 0 ? (
+                      <div className="px-3 py-3 text-sm text-slate-500">
+                        No existing customer matches{" "}
+                        <span className="font-semibold">"{customerSearch}"</span>.
+                        A new customer will be created with this name when you start the order.
+                      </div>
+                    ) : (
+                      <>
+                        {filteredCustomers.slice(0, 20).map((c: any) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()} // prevent Input onBlur from firing before click
+                            onClick={() => {
+                              setS1Name(c.name);
+                              setCustomerSearch(c.name);
+                              setS1Type(c.type === "cash" ? "cash" : "credit");
+                              setShowCustomerResults(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 transition-colors flex items-center justify-between gap-2 text-slate-700"
+                          >
+                            <span className="font-medium truncate">
+                              {c.name}
+                              {c.phone ? (
+                                <span className="text-slate-500 font-normal"> — {c.phone}</span>
+                              ) : null}
+                            </span>
+                            <span className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0">
+                              {c.type === "cash" ? "Cash" : "Credit"}
+                            </span>
+                          </button>
+                        ))}
+                        {filteredCustomers.length > 20 && (
+                          <div className="px-3 py-2 text-xs text-slate-400 text-center bg-slate-50">
+                            Showing 20 of {filteredCustomers.length} matches — refine your search to narrow down
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* Hidden mirror — s1Name is the actual value submitted; show it
+                  as a hint when the search field matches a known customer. */}
+              {s1Name && !showCustomerResults && (
+                <p className="text-xs text-slate-500">
+                  Customer: <span className="font-medium text-slate-700">{s1Name}</span>
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-slate-600">Customer Type</Label>
+              <RadioGroup
+                value={s1Type}
+                onValueChange={(v) => setS1Type(v as "credit" | "cash")}
+                className="flex flex-row gap-6"
+              >
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="credit" id="type-credit" />
+                  <Label htmlFor="type-credit" className="font-normal cursor-pointer">
+                    Credit (Udhaar)
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="cash" id="type-cash" />
+                  <Label htmlFor="type-cash" className="font-normal cursor-pointer">
+                    Cash (Nagad)
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="order-date" className="text-slate-600">
+                  Order Date
+                </Label>
+                <Input
+                  id="order-date"
+                  type="date"
+                  value={s1Date}
+                  onChange={(e) => setS1Date(e.target.value)}
+                  className="max-w-xs"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="target-weight" className="text-slate-600">
+                  Target Total Weight (kg)
+                </Label>
+                <Input
+                  id="target-weight"
+                  type="number"
+                  min={1}
+                  placeholder="e.g. 1000"
+                  value={s1Target}
+                  onChange={(e) => setS1Target(e.target.value)}
+                  className="max-w-xs"
+                />
+              </div>
+            </div>
+
+            {/* ── Optional Driver fields (order-level) ── */}
+            <div className="rounded-xl border border-slate-200/60 bg-slate-50/40 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Label className="text-slate-700 font-semibold text-sm">
+                  Driver Details <span className="text-slate-400 font-normal">(optional)</span>
+                </Label>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="driver-name" className="text-xs font-semibold uppercase text-slate-500">
+                    Driver Name
+                  </Label>
+                  <Input
+                    id="driver-name"
+                    placeholder="e.g. Rana"
+                    value={s1DriverName}
+                    onChange={(e) => setS1DriverName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="driver-rent" className="text-xs font-semibold uppercase text-slate-500">
+                    Driver Rent (Rs.)
+                  </Label>
+                  <Input
+                    id="driver-rent"
+                    type="number"
+                    min={0}
+                    step="any"
+                    placeholder="0"
+                    value={s1DriverRent}
+                    onChange={(e) => setS1DriverRent(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* ── Location selector ── */}
+            <div className="flex items-center gap-3 p-3 rounded-lg border border-slate-200/60 bg-slate-50/40">
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide whitespace-nowrap">Sale Location:</Label>
+              <LocationSelect value={s1LocationId} onChange={setS1LocationId} />
+              <span className="text-xs text-slate-500">Stock will be deducted from this location.</span>
+            </div>
+
+            <Separator />
+
+            <Button
+              onClick={handleStartOrder}
+              className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-semibold"
+            >
+              <FlaskConical className="w-4 h-4 mr-1" />
+              Start Order
+            </Button>
+          </div>
+
+          {/* ── Past Mix Orders ── */}
+          <div id="section-past" className="scroll-mt-24">
+          <PastMixOrdersSection
+            pastSearchInput={pastSearchInput}
+            setPastSearchInput={setPastSearchInput}
+            pastOrders={pastOrders}
+            selectedPastId={selectedPastId}
+            setSelectedPastId={setSelectedPastId}
+            selectedPast={selectedPast}
+            page={pastQ.data?.page ?? 1}
+            totalPages={pastQ.data?.totalPages ?? 1}
+            total={pastQ.data?.total ?? 0}
+            isFetching={pastQ.isFetching}
+            isLoading={pastQ.isLoading && !pastQ.data}
+            onPrev={() => setPastPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPastPage((p) => p + 1)}
+            onDownloadExcel={handleDownloadPastExcel}
+            downloadingExcel={downloadingPastExcel}
+            isSearchActive={pastSearchDebounced.trim().length > 0}
+            searchQuery={pastSearchDebounced}
+            onEdit={() => setEditOpen(true)}
+            onDelete={() => setDeleteOpen(true)}
+          />
+          </div>
+        </div>
+
+        {/* ── Edit / Delete dialogs ── */}
+        <ConfirmAction
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          title="Delete Mix Order"
+          description={
+            selectedPast
+              ? `Mix Order #${selectedPast.id} (${selectedPast.customer}) ko database se permanently delete karna hai? Customer ka balance aur stock dono reverse ho jayenge.`
+              : ""
+          }
+          confirmLabel="Haan, Delete Karo"
+          variant="danger"
+          onConfirm={handleDeleteMixOrder}
+          loading={deleteSaving}
+        />
+        <EditMixOrderDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          order={selectedPast}
+          products={products}
+          saving={editSaving}
+          onSave={handleUpdateMixOrder}
+        />
+      </div>
+  );
+}
+
+  /* ─────────────────────────────── STATE 2 ─────────────────────────────── */
+  return (
+    <div className="min-h-screen bg-slate-100">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+        <PageHeader
+          title="Custom Mix Order"
+          subtitle={`Building mix for ${store.customerName} — ${store.orderDate}`}
+        />
+
+        {/* Live stock panel — visible while building the mix order so the
+            user can see stock depleting in real time as they add ingredients.
+            Use hideSummary to avoid duplicating the metric cards already shown
+            in the Metrics Row below. */}
+        <AvailableStock refreshTrigger={stockRefreshTrigger} hideSummary />
+
+        <QuickNav
+          title="Jump to"
+          items={[
+            { id: "section-metrics", label: "Mix Metrics", icon: Scale },
+            { id: "section-ingredient", label: "Add Ingredient", icon: Plus },
+            { id: "section-current-mix", label: "Current Mix", icon: Receipt },
+          ]}
+        />
+
+        {/* ── Metrics Row ── */}
+        <div id="section-metrics" className="grid grid-cols-1 sm:grid-cols-3 gap-4 scroll-mt-24">
+          <MetricCard label="Target Weight" value={`${fmtRs(store.targetWeight!)} kg`} color="blue" />
+          <MetricCard label="Weight Used So Far" value={`${fmtRs(usedWeight)} kg`} color="purple" />
+          <MetricCard label="Remaining to Fill" value={`${fmtRs(Math.max(0, remaining))} kg`} color={remaining <= 0 ? "green" : "orange"} />
+        </div>
+
+        {/* ── Add Ingredient Form ── */}
+        <div id="section-ingredient" className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6 space-y-4 scroll-mt-24">
+          <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+            <Plus className="w-4 h-4 text-slate-400" />
+            Add an Ingredient
+          </h3>
+
+          {/* 5-field unit-based rate layout (owner upgrade, Aug 2026).
+              Replaces the old 3-col form + green "Bag details" panel.
+              Formula: total_amount = (total_weight / rate_basis_weight) × quoted_rate */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase text-slate-500">Product</Label>
+              <Select value={addProduct} onValueChange={setAddProduct}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {products.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase text-slate-500">Total Weight (kg)</Label>
+              <Input
+                type="number"
+                min={0}
+                step="any"
+                placeholder="0"
+                value={addWeight}
+                onChange={(e) => setAddWeight(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase text-slate-500">
+                Rate Basis Weight (kg)
+                <span className="ml-1 font-normal normal-case text-slate-400">(e.g. 40 = per 40kg)</span>
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                step="any"
+                placeholder="40"
+                value={addRateBasis}
+                onChange={(e) => setAddRateBasis(e.target.value)}
+              />
+              {/* Quick presets for common basis weights */}
+              <div className="flex gap-1.5">
+                {[1, 40, 50].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setAddRateBasis(String(preset))}
+                    className={`text-[10px] px-2 py-0.5 rounded-md border transition-colors ${
+                      addRateBasis === String(preset)
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"
+                    }`}
+                  >
+                    {preset} kg
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase text-slate-500">
+                Quoted Rate (PKR)
+                <span className="ml-1 font-normal normal-case text-slate-400">/ basis weight</span>
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                step="any"
+                placeholder="0"
+                value={addRate}
+                onChange={(e) => setAddRate(e.target.value)}
+              />
+              {/* Show effective per-kg rate for transparency */}
+              {Number(addRateBasis) > 0 && Number(addRate) > 0 && (
+                <div className="text-[10px] text-slate-500 font-medium">
+                  Effective: <span className="text-slate-700 font-semibold">Rs. {(Number(addRate) / Number(addRateBasis)).toLocaleString("en-PK", { maximumFractionDigits: 2 })}/kg</span>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase text-slate-500">
+                Total Amount (PKR)
+                <span className="ml-1 font-normal normal-case text-emerald-600">auto</span>
+              </Label>
+              <div className="h-9 px-3 flex items-center justify-end rounded-md border border-emerald-200 bg-emerald-50 text-sm font-bold tabular-nums text-emerald-700">
+                {liveTotalAmount > 0
+                  ? `Rs. ${liveTotalAmount.toLocaleString("en-PK", { maximumFractionDigits: 2 })}`
+                  : "—"}
+              </div>
+              {/* Show the calculation breakdown for clarity */}
+              {liveTotalAmount > 0 && (
+                <div className="text-[10px] text-slate-500 font-medium">
+                  = ({Number(addWeight)} ÷ {Number(addRateBasis)}) × {Number(addRate).toLocaleString("en-PK")}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <Button onClick={handleAddIngredient} className="bg-slate-900 hover:bg-slate-800 text-white font-semibold w-full sm:w-auto">
+            <Plus className="w-4 h-4 mr-1" />
+            Add to Mix
+          </Button>
+        </div>
+
+        {/* ── Current Mix Table ── */}
+        <div id="section-current-mix" className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6 space-y-4 scroll-mt-24">
+          <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+            <Scale className="w-4 h-4 text-slate-400" />
+            Current Mix
+            {store.ingredients.length > 0 && (
+              <span className="ml-1 text-xs font-normal text-slate-400">
+                ({store.ingredients.length} item{store.ingredients.length > 1 ? "s" : ""})
+              </span>
+            )}
+          </h3>
+
+          {store.ingredients.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 text-sm">
+              No ingredients added yet. Use the form above to start building your mix.
+            </div>
+          ) : (
+            <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-100">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                    <TableHead className="text-xs uppercase text-slate-500 font-semibold">#</TableHead>
+                    <TableHead className="text-xs uppercase text-slate-500 font-semibold">Product</TableHead>
+                    <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Weight (kg)</TableHead>
+                    <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Quoted Rate</TableHead>
+                    <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Amount</TableHead>
+                    <TableHead className="text-xs uppercase text-slate-500 font-semibold w-16">Del</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {store.ingredients.map((ing, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell className="text-slate-500 text-xs">{idx + 1}</TableCell>
+                      <TableCell className="font-medium text-slate-800 text-sm">{ing.product}</TableCell>
+                      <TableCell className="text-right tabular-nums text-sm">{fmtRs(ing.weight_kg)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-sm text-slate-600">
+                        {ing.quoted_rate != null && ing.rate_basis_weight != null ? (
+                          <span>
+                            Rs. {fmtRs(ing.quoted_rate)}
+                            <span className="text-slate-400"> / {fmtRs(ing.rate_basis_weight)} kg</span>
+                          </span>
+                        ) : (
+                          // Backward-compat: older ingredients without basis fields
+                          <span>Rs. {fmtRs(ing.rate_per_kg)} <span className="text-slate-400">/ kg</span></span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-sm font-semibold text-slate-800">Rs. {fmtRs(ing.amount)}</TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => store.removeIngredient(idx)}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="bg-slate-50/60 font-semibold">
+                    <TableCell colSpan={2} className="text-slate-600 text-sm">Total</TableCell>
+                    <TableCell className="text-right tabular-nums text-sm text-slate-800">{fmtRs(usedWeight)} kg</TableCell>
+                    <TableCell />
+                    <TableCell className="text-right tabular-nums text-sm text-slate-800">Rs. {fmtRs(totalAmount)}</TableCell>
+                    <TableCell />
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+
+        {/* ── Bill Summary & Actions ── */}
+        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6 space-y-5">
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-slate-50 border border-slate-100">
+            <Receipt className="w-5 h-5 text-green-600 shrink-0" />
+            <div className="flex-1">
+              <div className="text-xs font-bold uppercase text-slate-500">💰 Bill So Far</div>
+              <div className="text-2xl font-extrabold text-slate-900 mt-0.5">Rs. {fmtRs(totalAmount)}</div>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs font-medium text-slate-500 mt-1">
+                <span>
+                  Total Weight: <span className="font-semibold text-slate-700">{fmtRs(usedWeight)} kg</span>
+                </span>
+                {usedWeight > 0 && (
+                  <span>
+                    Avg Rate/kg: <span className="font-semibold text-slate-700">Rs. {(totalAmount / usedWeight).toLocaleString("en-PK", { maximumFractionDigits: 2 })}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+            {store.customerType === "credit" && (
+              <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
+                Credit (Udhaar)
+              </span>
+            )}
+            {store.customerType === "cash" && (
+              <span className="text-xs font-medium text-green-600 bg-green-50 border border-green-200 rounded-full px-3 py-1">
+                Cash (Nagad)
+              </span>
+            )}
+          </div>
+
+          {/* Driver info readout (if entered) */}
+          {(store.driverName || store.driverRent > 0) && (
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-50/60 border border-blue-100">
+              <div className="text-xs font-bold uppercase text-blue-600">🚚 Driver</div>
+              <div className="flex-1 text-sm">
+                {store.driverName && <span className="text-slate-700 font-medium">{store.driverName}</span>}
+                {store.driverRent > 0 && (
+                  <span className="text-slate-500 ml-3">Rent: <span className="font-semibold text-slate-700">Rs. {fmtRs(store.driverRent)}</span></span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {store.customerType === "cash" && (
+            <div className="space-y-2">
+              <Label htmlFor="cash-received" className="text-slate-600">Cash Received</Label>
+              <div className="flex items-center gap-3 max-w-sm">
+                <span className="text-sm font-medium text-slate-500">Rs.</span>
+                <Input id="cash-received" type="number" min={0} step="any" placeholder="0" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} />
+              </div>
+              {Number(cashReceived) > 0 && (
+                <p className={cn("text-xs font-medium", Number(cashReceived) >= totalAmount ? "text-green-600" : "text-red-500")}>
+                  {Number(cashReceived) >= totalAmount
+                    ? `Change: Rs. ${fmtRs(Number(cashReceived) - totalAmount)}`
+                    : `Remaining: Rs. ${fmtRs(totalAmount - Number(cashReceived))}`}
+                </p>
+              )}
+            </div>
+          )}
+
+          <Separator />
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button variant="outline" onClick={handleCancel} className="flex-1 sm:flex-none border-slate-300 hover:bg-slate-100">
+              <RotateCcw className="w-4 h-4 mr-1" />
+              🔄 Cancel / Start Over
+            </Button>
+            <Button onClick={handleFinishOrder} disabled={saving} className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 text-white font-semibold">
+              {saving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-1" />}
+              {saving ? "Saving..." : "✅ Finish Order & Download Bill (PDF)"}
+            </Button>
+          </div>
+        </div>
+
+        {/* ── Past Mix Orders ── */}
+        <PastMixOrdersSection
+          pastSearchInput={pastSearchInput}
+          setPastSearchInput={setPastSearchInput}
+          pastOrders={pastOrders}
+          selectedPastId={selectedPastId}
+          setSelectedPastId={setSelectedPastId}
+          selectedPast={selectedPast}
+          page={pastQ.data?.page ?? 1}
+          totalPages={pastQ.data?.totalPages ?? 1}
+          total={pastQ.data?.total ?? 0}
+          isFetching={pastQ.isFetching}
+          isLoading={pastQ.isLoading && !pastQ.data}
+          onPrev={() => setPastPage((p) => Math.max(1, p - 1))}
+          onNext={() => setPastPage((p) => p + 1)}
+          onDownloadExcel={handleDownloadPastExcel}
+          downloadingExcel={downloadingPastExcel}
+          isSearchActive={pastSearchDebounced.trim().length > 0}
+          searchQuery={pastSearchDebounced}
+          onEdit={() => setEditOpen(true)}
+          onDelete={() => setDeleteOpen(true)}
+        />
+      </div>
+
+      {/* ── Edit / Delete dialogs ── */}
+      <ConfirmAction
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete Mix Order"
+        description={
+          selectedPast
+            ? `Mix Order #${selectedPast.id} (${selectedPast.customer}) ko database se permanently delete karna hai? Customer ka balance aur stock dono reverse ho jayenge.`
+            : ""
+        }
+        confirmLabel="Haan, Delete Karo"
+        variant="danger"
+        onConfirm={handleDeleteMixOrder}
+        loading={deleteSaving}
+      />
+      <EditMixOrderDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        order={selectedPast}
+        products={products}
+        saving={editSaving}
+        onSave={handleUpdateMixOrder}
+      />
+    </div>
+  );
+}
+
+/* ─── Past Mix Orders Sub-Section ─── */
+function PastMixOrdersSection({
+  pastSearchInput,
+  setPastSearchInput,
+  pastOrders,
+  selectedPastId,
+  setSelectedPastId,
+  selectedPast,
+  page,
+  totalPages,
+  total,
+  isFetching,
+  isLoading,
+  onPrev,
+  onNext,
+  onDownloadExcel,
+  downloadingExcel,
+  isSearchActive,
+  searchQuery,
+  onEdit,
+  onDelete,
+}: {
+  pastSearchInput: string;
+  setPastSearchInput: (v: string) => void;
+  pastOrders: any[];
+  selectedPastId: string | null;
+  setSelectedPastId: (v: string | null) => void;
+  selectedPast: any | null;
+  page: number;
+  totalPages: number;
+  total: number;
+  isFetching: boolean;
+  isLoading: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  onDownloadExcel: () => void;
+  downloadingExcel: boolean;
+  isSearchActive: boolean;
+  searchQuery: string;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <section className="space-y-4">
+      <Separator />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-bold text-slate-800">Past Mix Orders</h2>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onDownloadExcel}
+          disabled={downloadingExcel || total === 0}
+          className="border-slate-300 hover:bg-slate-100"
+        >
+          {downloadingExcel ? (
+            <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+          ) : (
+            <Download className="w-3.5 h-3.5 mr-1" />
+          )}
+          {downloadingExcel ? "Downloading..." : "Download Excel (All)"}
+        </Button>
+      </div>
+
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <Input
+          placeholder="Search by customer name… (server-side)"
+          value={pastSearchInput}
+          onChange={(e) => {
+            setPastSearchInput(e.target.value);
+          }}
+          className="pl-9"
+        />
+        {pastSearchInput && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 px-2 text-slate-400"
+            onClick={() => setPastSearchInput("")}
+          >
+            Clear
+          </Button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-8 text-center text-slate-400 text-sm">
+          <Loader2 className="w-5 h-5 animate-spin inline-block mr-2" />
+          Loading past orders...
+        </div>
+      ) : pastOrders.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-8 text-center text-slate-500 text-sm">
+          {isSearchActive ? (
+            <>
+              <Search className="size-8 mx-auto mb-2 opacity-30" />
+              No record for the customer &quot;{searchQuery}&quot;.
+            </>
+          ) : (
+            "No past mix orders recorded yet."
+          )}
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+          <div className="max-h-96 overflow-y-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                  <TableHead className="text-xs uppercase text-slate-500 font-semibold">Order ID</TableHead>
+                  <TableHead className="text-xs uppercase text-slate-500 font-semibold">Customer</TableHead>
+                  <TableHead className="text-xs uppercase text-slate-500 font-semibold">Date</TableHead>
+                  <TableHead className="text-xs uppercase text-slate-500 font-semibold">Driver</TableHead>
+                  <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Items</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pastOrders.map((order) => (
+                  <TableRow
+                    key={order.id}
+                    className={cn("cursor-pointer", selectedPastId === order.id && "bg-slate-50")}
+                    onClick={() => setSelectedPastId(selectedPastId === order.id ? null : order.id)}
+                  >
+                    <TableCell className="font-mono text-xs text-slate-600">{order.id}</TableCell>
+                    <TableCell className="font-medium text-slate-800 text-sm">{order.customer}</TableCell>
+                    <TableCell className="text-sm text-slate-600">{order.date}</TableCell>
+                    <TableCell className="text-sm text-slate-600">{order.driverName || "—"}{order.driverRent > 0 ? <span className="block text-xs text-slate-400">Rs. {fmtRs(order.driverRent)}</span> : null}</TableCell>
+                    <TableCell className="text-right text-sm text-slate-600">{order.sales?.length ?? 0}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Pagination footer */}
+          <div className="border-t border-slate-100 bg-slate-50/50 p-3 flex items-center justify-end gap-3">
+            <span className="text-xs text-slate-500">
+              Page {page} of {totalPages}
+              {" · "}
+              {total} orders
+              {isFetching ? " · loading…" : ""}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || isFetching}
+                onClick={onPrev}
+              >
+                <ChevronLeft className="size-4" />
+                Prev
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || isFetching}
+                onClick={onNext}
+              >
+                Next
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          </div>
+
+          {selectedPast && (() => {
+            const billItems = (selectedPast.sales ?? []).map((s: any) => ({
+              product: s.products?.name ?? "Unknown",
+              weight_kg: s.quantity,
+              rate_per_kg: s.rate_per_bag,
+              amount: s.quantity * s.rate_per_bag,
+              // Audit fields (owner upgrade, Aug 2026) — may be NULL for
+              // legacy rows saved before the upgrade.
+              rate_basis_weight: s.rate_basis_weight ?? null,
+              quoted_rate: s.quoted_rate ?? null,
+            }));
+            const billTotalWeight = billItems.reduce((s, i) => s + i.weight_kg, 0);
+            const billTotalAmount = billItems.reduce((s, i) => s + i.amount, 0);
+            // Show the "Quoted Rate" column only if at least one line has
+            // the new audit fields — otherwise the legacy "Rate/kg" view
+            // is more compact and familiar.
+            const hasQuotedRates = billItems.some(
+              (i: any) => i.rate_basis_weight != null && i.quoted_rate != null,
+            );
+
+            return (<>
+              {/* Screen: order detail */}
+              <div className="border-t border-slate-200/60 bg-slate-50/50 p-6 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <h3 className="text-sm font-bold text-slate-700">
+                    📋 {selectedPast.id} — {selectedPast.customer}
+                  </h3>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-slate-300 hover:bg-slate-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      generateMixBillPDF({
+                        orderId: selectedPast.id,
+                        customerName: selectedPast.customer,
+                        customerType: "credit",
+                        orderDate: selectedPast.date,
+                        items: billItems,
+                        totalWeight: billTotalWeight,
+                        totalAmount: billTotalAmount,
+                        driverName: selectedPast.driverName || null,
+                        driverRent: selectedPast.driverRent || 0,
+                      }).then((billResult) => {
+                        toast.success("Bill PDF download ho rahi hai!", {
+                          description: "Share on WhatsApp with the client?",
+                          action: {
+                            label: "Share on WhatsApp",
+                            onClick: () => {
+                              const result = shareBillOnWhatsApp(billResult);
+                              showWhatsAppShareToast(result);
+                            },
+                          },
+                          duration: 12000,
+                        });
+                      })
+                      .catch(() => toast.error("PDF bill generate nahi ho saki"));
+                    }}
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1" />
+                    Download Bill (PDF)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-slate-300 hover:bg-slate-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      printMixBill(
+                        { id: selectedPast.id, customer: selectedPast.customer, date: selectedPast.date, driverName: selectedPast.driverName, driverRent: selectedPast.driverRent },
+                        billItems,
+                        billTotalWeight,
+                        billTotalAmount,
+                      );
+                    }}
+                  >
+                    <Printer className="w-3.5 h-3.5 mr-1" />
+                    Print Bill
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit();
+                    }}
+                  >
+                    <Pencil className="w-3.5 h-3.5 mr-1" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-red-300 text-red-600 hover:bg-red-50"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete();
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-1" />
+                    Delete
+                  </Button>
+                </div>
+
+                <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-100">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                        <TableHead className="text-xs uppercase text-slate-500 font-semibold">#</TableHead>
+                        <TableHead className="text-xs uppercase text-slate-500 font-semibold">Product</TableHead>
+                        <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Weight (kg)</TableHead>
+                        {hasQuotedRates ? (
+                          <>
+                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Quoted Rate</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Effective /kg</TableHead>
+                          </>
+                        ) : (
+                          <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Rate/kg</TableHead>
+                        )}
+                        <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {billItems.map((item: any, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell className="text-slate-500 text-xs">{idx + 1}</TableCell>
+                          <TableCell className="font-medium text-slate-800 text-sm">{item.product}</TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">{fmtRs(item.weight_kg)}</TableCell>
+                          {hasQuotedRates ? (
+                            <>
+                              <TableCell className="text-right tabular-nums text-sm text-slate-600">
+                                {item.quoted_rate != null && item.rate_basis_weight != null ? (
+                                  <span>
+                                    Rs. {fmtRs(item.quoted_rate)}
+                                    <span className="text-slate-400"> / {fmtRs(item.rate_basis_weight)} kg</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums text-sm text-slate-500">
+                                Rs. {fmtRs(item.rate_per_kg)}
+                              </TableCell>
+                            </>
+                          ) : (
+                            <TableCell className="text-right tabular-nums text-sm">{fmtRs(item.rate_per_kg)}</TableCell>
+                          )}
+                          <TableCell className="text-right tabular-nums text-sm font-semibold text-slate-800">Rs. {fmtRs(item.amount)}</TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow className="bg-slate-100/60 font-semibold">
+                        <TableCell colSpan={2} className="text-slate-600 text-sm">Total</TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-slate-800">
+                          {fmtRs(billTotalWeight)} kg
+                        </TableCell>
+                        {hasQuotedRates && <TableCell />}
+                        <TableCell />
+                        <TableCell className="text-right tabular-nums text-sm text-slate-800">
+                          Rs. {fmtRs(billTotalAmount)}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </>);
+          })()}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ─── Edit Mix Order Dialog ───
+   Full edit modal for an existing mix order. Lets the user change:
+   - Customer, order date, target weight, location
+   - Driver name + rent
+   - All line items (add / edit / delete / reorder not supported — full replacement)
+   Each line item: product (select), weight, rate basis (kg), quoted rate.
+   Total amount is computed live = Σ (weight / rate_basis) × quoted_rate.
+   On Save → calls PUT /api/mix-orders with the full payload (replacement, not patch).
+*/
+interface EditMixOrderDialogProps {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  order: any | null;
+  products: Product[];
+  saving: boolean;
+  onSave: (payload: {
+    customer_id: number;
+    order_date: string;
+    target_weight_kg: number | null;
+    cash_received: number;
+    driver_name: string | null;
+    driver_rent: number;
+    location_id: number | null;
+    items: {
+      product_id: number;
+      quantity: number;
+      rate_per_kg: number;
+      rate_basis_weight?: number | null;
+      quoted_rate?: number | null;
+    }[];
+  }) => void;
+}
+
+function EditMixOrderDialog({ open, onOpenChange, order, products, saving, onSave }: EditMixOrderDialogProps) {
+  // Local editable state — re-seeded whenever `order` changes (i.e. when the
+  // dialog opens for a different mix order).
+  const [customerId, setCustomerId] = useState<string>("");
+  const [orderDate, setOrderDate] = useState<string>("");
+  const [targetWeight, setTargetWeight] = useState<string>("");
+  const [locationId, setLocationId] = useState<number>(2);
+  const [driverName, setDriverName] = useState<string>("");
+  const [driverRent, setDriverRent] = useState<string>("");
+  // Each line item: { key, product_id, weight, rate_basis, quoted_rate }
+  const [items, setItems] = useState<any[]>([]);
+
+  // Active customers list for the customer <select>
+  const { data: customersData } = useCustomers(true);
+  const customers = customersData?.customers ?? [];
+
+  // Re-seed when order changes
+  useEffect(() => {
+    if (!open || !order) return;
+    setCustomerId(order.customer_id ? String(order.customer_id) : "");
+    setOrderDate(order.date || pktToday());
+    setTargetWeight(order.target_weight_kg ? String(order.target_weight_kg) : "");
+    setLocationId(order.location_id ?? 2);
+    setDriverName(order.driverName || "");
+    setDriverRent(order.driverRent ? String(order.driverRent) : "");
+    setItems(
+      (order.sales ?? []).map((s: any, idx: number) => {
+        const weight = Number(s.quantity) || 0;
+        const basis = s.rate_basis_weight != null ? Number(s.rate_basis_weight) : 40;
+        const quoted = s.quoted_rate != null ? Number(s.quoted_rate) : Number(s.rate_per_bag) * basis;
+        return {
+          key: `${idx}-${Date.now()}`,
+          product_id: s.product_id,
+          weight: String(weight),
+          rate_basis: String(basis),
+          quoted_rate: String(quoted),
+        };
+      }),
+    );
+  }, [open, order]);
+
+  const totalWeight = useMemo(
+    () => items.reduce((s, it) => s + (Number(it.weight) || 0), 0),
+    [items],
+  );
+  const totalAmount = useMemo(
+    () =>
+      items.reduce((s, it) => {
+        const w = Number(it.weight) || 0;
+        const b = Number(it.rate_basis) || 0;
+        const r = Number(it.quoted_rate) || 0;
+        if (!w || !b || !r) return s;
+        return s + (w / b) * r;
+      }, 0),
+    [items],
+  );
+
+  const updateItem = (key: string, patch: any) => {
+    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
+  };
+  const removeItem = (key: string) => {
+    setItems((prev) => prev.filter((it) => it.key !== key));
+  };
+  const addItem = () => {
+    setItems((prev) => [
+      ...prev,
+      { key: `new-${Date.now()}`, product_id: "", weight: "", rate_basis: "40", quoted_rate: "" },
+    ]);
+  };
+
+  const handleSave = () => {
+    if (!customerId) {
+      toast.error("Customer select karein");
+      return;
+    }
+    const cleanItems = items
+      .filter((it) => it.product_id && Number(it.weight) > 0)
+      .map((it) => {
+        const w = Number(it.weight);
+        const b = Number(it.rate_basis) || 40;
+        const r = Number(it.quoted_rate);
+        return {
+          product_id: Number(it.product_id),
+          quantity: w,
+          rate_per_kg: b > 0 ? r / b : 0,
+          rate_basis_weight: b,
+          quoted_rate: r,
+        };
+      });
+    if (cleanItems.length === 0) {
+      toast.error("Kam az kam ek valid line item chahiye");
+      return;
+    }
+    onSave({
+      customer_id: Number(customerId),
+      order_date: orderDate,
+      target_weight_kg: targetWeight ? Number(targetWeight) : null,
+      cash_received: 0,
+      driver_name: driverName.trim() || null,
+      driver_rent: Number(driverRent) || 0,
+      location_id: locationId,
+      items: cleanItems,
+    });
+  };
+
+  if (!order) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Pencil className="w-4 h-4 text-amber-600" />
+            Edit Mix Order #{order.id}
+          </DialogTitle>
+          <DialogDescription>
+            Order ki details update karein. Save karne pe purani line items replace ho jayengi.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          {/* Header fields */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase text-slate-500 font-semibold">Customer</Label>
+              <Select value={customerId} onValueChange={setCustomerId}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select customer" /></SelectTrigger>
+                <SelectContent>
+                  {customers.map((c: any) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.name} ({c.type})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase text-slate-500 font-semibold">Order Date</Label>
+              <Input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase text-slate-500 font-semibold">Target Weight (kg)</Label>
+              <Input type="number" min={1} value={targetWeight} onChange={(e) => setTargetWeight(e.target.value)} placeholder="e.g. 1000" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase text-slate-500 font-semibold">Sale Location</Label>
+              <LocationSelect value={locationId} onChange={setLocationId} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase text-slate-500 font-semibold">Driver Name (optional)</Label>
+              <Input value={driverName} onChange={(e) => setDriverName(e.target.value)} placeholder="e.g. Rana" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase text-slate-500 font-semibold">Driver Rent (Rs.)</Label>
+              <Input type="number" min={0} step="any" value={driverRent} onChange={(e) => setDriverRent(e.target.value)} placeholder="0" />
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Line items */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold text-slate-700">Line Items</Label>
+              <Button variant="outline" size="sm" onClick={addItem} type="button">
+                <Plus className="w-3.5 h-3.5 mr-1" /> Add Item
+              </Button>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50/80">
+                    <TableHead className="text-xs uppercase">Product</TableHead>
+                    <TableHead className="text-xs uppercase text-right">Weight (kg)</TableHead>
+                    <TableHead className="text-xs uppercase text-right">Rate Basis (kg)</TableHead>
+                    <TableHead className="text-xs uppercase text-right">Quoted Rate (Rs.)</TableHead>
+                    <TableHead className="text-xs uppercase text-right">Amount</TableHead>
+                    <TableHead className="w-10" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-slate-400 text-sm py-4">
+                        Koi line item nahi — &quot;Add Item&quot; se add karein
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    items.map((it) => {
+                      const w = Number(it.weight) || 0;
+                      const b = Number(it.rate_basis) || 0;
+                      const r = Number(it.quoted_rate) || 0;
+                      const amt = w > 0 && b > 0 && r > 0 ? (w / b) * r : 0;
+                      return (
+                        <TableRow key={it.key}>
+                          <TableCell>
+                            <Select
+                              value={it.product_id ? String(it.product_id) : ""}
+                              onValueChange={(v) => updateItem(it.key, { product_id: v })}
+                            >
+                              <SelectTrigger className="min-w-[160px]"><SelectValue placeholder="Select" /></SelectTrigger>
+                              <SelectContent>
+                                {products.map((p: any) => (
+                                  <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <Input type="number" min={0} step="any" className="w-24 text-right" value={it.weight}
+                              onChange={(e) => updateItem(it.key, { weight: e.target.value })} />
+                          </TableCell>
+                          <TableCell>
+                            <Input type="number" min={1} step="any" className="w-20 text-right" value={it.rate_basis}
+                              onChange={(e) => updateItem(it.key, { rate_basis: e.target.value })} />
+                          </TableCell>
+                          <TableCell>
+                            <Input type="number" min={0} step="any" className="w-28 text-right" value={it.quoted_rate}
+                              onChange={(e) => updateItem(it.key, { quoted_rate: e.target.value })} />
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm font-medium">
+                            Rs. {fmtRs(amt)}
+                          </TableCell>
+                          <TableCell>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50"
+                              onClick={() => removeItem(it.key)} type="button">
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                  {items.length > 0 && (
+                    <TableRow className="bg-slate-100/60 font-semibold">
+                      <TableCell className="text-slate-600 text-sm">Total</TableCell>
+                      <TableCell className="text-right tabular-nums text-sm text-slate-800">{fmtRs(totalWeight)} kg</TableCell>
+                      <TableCell colSpan={2} />
+                      <TableCell className="text-right tabular-nums text-sm text-slate-800">Rs. {fmtRs(totalAmount)}</TableCell>
+                      <TableCell />
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={saving} className="bg-amber-600 hover:bg-amber-700 text-white">
+            {saving ? (
+              <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Saving...</>
+            ) : (
+              <><Pencil className="w-4 h-4 mr-1" /> Save Changes</>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
