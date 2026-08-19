@@ -1,0 +1,6 @@
+{
+  "name": "Danish Cattle Feed",
+  "description": "Daily business register and khata management for Danish Cattle Feed sales, purchases, stock, and customer accounts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

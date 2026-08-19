@@ -3,7 +3,7 @@
 // specific storage implementation. Fields map to UI concerns only.
 
 export interface BaseEntity {
-  id: number | string;
+  id: number;
   created_at: string;
 }
 
@@ -232,6 +232,7 @@ export interface AppCustomer {
   id: string;
   name: string;
   email: string;
+  password?: string;
   subscription_type: SubscriptionType;
   subscription_start: string;
   subscription_end: string;

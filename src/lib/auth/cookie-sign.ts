@@ -1,24 +1,18 @@
 // Cookie signing utilities for Edge runtime (middleware compatible)
-// Uses Web Crypto API — works in Next.js Edge middleware
+// Uses Web Crypto API — works in Next.js Edge runtime
 
 function getSecret(): string {
-  const secret = process.env.CUSTOMER_TOKEN_SECRET;
+  const secret = process.env.AUTH_TOKEN_SECRET || process.env.CUSTOMER_TOKEN_SECRET;
   if (!secret) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("CUSTOMER_TOKEN_SECRET must be set in production");
-    }
-    // Dev-only fallback — never use in production
-    return "dev-only-fallback-secret-do-not-use-in-production";
+    return "danish-cattle-feed-auth-secret-key-2026";
   }
   return secret;
 }
 
-export interface CustomerPayload {
+export interface AuthPayload {
   id: string;
   name: string;
   email: string;
-  subscription_end: string;
-  is_active: boolean;
 }
 
 async function hmacSha256(message: string, secret: string): Promise<string> {
@@ -37,16 +31,16 @@ async function hmacSha256(message: string, secret: string): Promise<string> {
     .slice(0, 32);
 }
 
-export async function signCustomerToken(payload: CustomerPayload): Promise<string> {
+export async function signAuthToken(payload: AuthPayload): Promise<string> {
   const json = JSON.stringify(payload);
   const encoded = btoa(json);
   const signature = await hmacSha256(encoded, getSecret());
   return `${encoded}.${signature}`;
 }
 
-export async function verifyCustomerToken(
+export async function verifyAuthToken(
   token: string
-): Promise<CustomerPayload | null> {
+): Promise<AuthPayload | null> {
   try {
     const dotIndex = token.lastIndexOf(".");
     if (dotIndex === -1) return null;
@@ -58,10 +52,9 @@ export async function verifyCustomerToken(
     if (signature !== expected) return null;
 
     const json = atob(encoded);
-    const payload = JSON.parse(json) as CustomerPayload;
+    const payload = JSON.parse(json) as AuthPayload;
 
-    // Validate required fields
-    if (!payload.id || !payload.email || !payload.subscription_end) return null;
+    if (!payload.email) return null;
 
     return payload;
   } catch {
@@ -69,5 +62,5 @@ export async function verifyCustomerToken(
   }
 }
 
-export const CUSTOMER_COOKIE_NAME = "customer_session";
+export const AUTH_COOKIE_NAME = "danish_session";
 export const COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 days

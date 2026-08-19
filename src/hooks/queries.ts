@@ -32,7 +32,7 @@ export const queryKeys = {
 };
 
 // ─── Generic fetcher ───
-async function fetcher<T>(url: string): Promise<T> {
+async function fetcher<T = any>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

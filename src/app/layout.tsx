@@ -4,7 +4,6 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
-import { SpeedInsights } from "@vercel/speed-insights/next";
 
 // NOTE: `weight` array removed — Google Fonts CDN intermittently returns 404
 // for specific Inter v20 weight URLs, which crashes Turbopack's font module
@@ -39,7 +38,6 @@ export default function RootLayout({
             <Toaster position="top-right" richColors />
           </AuthProvider>
         </QueryProvider>
-        <SpeedInsights />
       </body>
     </html>
   );

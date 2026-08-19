@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { verifyCustomerToken, CUSTOMER_COOKIE_NAME } from "@/lib/auth/cookie-sign";
+import { verifyAuthToken, AUTH_COOKIE_NAME } from "@/lib/auth/cookie-sign";
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -21,10 +21,18 @@ function isCsrfSafe(request: NextRequest): boolean {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith("/_next")) {
+  // Allow static files and internals
+  if (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/fonts") ||
+    pathname.startsWith("/public") ||
+    pathname === "/favicon.ico" ||
+    pathname === "/robots.txt"
+  ) {
     return NextResponse.next();
   }
 
+  // API CSRF check
   if (pathname.startsWith("/api")) {
     if (!isCsrfSafe(request)) {
       return NextResponse.json({ error: "CSRF validation failed" }, { status: 403 });
@@ -32,48 +40,32 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (pathname === "/") {
+  const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+  const payload = token ? await verifyAuthToken(token) : null;
+  const isAuthenticated = !!payload;
+
+  // If on login page
+  if (pathname === "/login") {
+    if (isAuthenticated) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next();
+  }
+
+  // Redirect legacy /admin or /customer routes directly to /
+  if (pathname.startsWith("/admin") || pathname.startsWith("/customer")) {
     const url = request.nextUrl.clone();
-    url.pathname = "/admin/login";
+    url.pathname = isAuthenticated ? "/" : "/login";
     return NextResponse.redirect(url);
   }
 
-  // Customer routes
-  if (pathname.startsWith("/customer")) {
-    if (pathname === "/customer/login") {
-      return NextResponse.next();
-    }
-    const token = request.cookies.get(CUSTOMER_COOKIE_NAME)?.value;
-    if (!token) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/customer/login";
-      return NextResponse.redirect(url);
-    }
-    const payload = await verifyCustomerToken(token);
-    if (!payload) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/customer/login";
-      url.searchParams.set("reason", "invalid_session");
-      return NextResponse.redirect(url);
-    }
-    if (!payload.is_active) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/customer/login";
-      url.searchParams.set("reason", "blocked");
-      return NextResponse.redirect(url);
-    }
-    if (new Date(payload.subscription_end) <= new Date()) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/customer/login";
-      url.searchParams.set("reason", "expired");
-      return NextResponse.redirect(url);
-    }
-    return NextResponse.next();
-  }
-
-  // Admin routes — auth handled by auth provider
-  if (pathname.startsWith("/admin")) {
-    return NextResponse.next();
+  // Protected pages
+  if (!isAuthenticated) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    return NextResponse.redirect(url);
   }
 
   return NextResponse.next();

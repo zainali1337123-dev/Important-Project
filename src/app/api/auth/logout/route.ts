@@ -1,20 +1,16 @@
 import { NextResponse } from "next/server";
-import { Service } from "@/lib/service";
+import { AUTH_COOKIE_NAME } from "@/lib/auth/cookie-sign";
 
-export async function GET(request: Request) {
-  try {
-    const data = await Service.list(request);
-    return NextResponse.json(data);
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to fetch" }, { status: 500 });
-  }
-}
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const result = await Service.create(body);
-    return NextResponse.json(result);
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to create" }, { status: 500 });
-  }
+export async function POST() {
+  const response = NextResponse.json({ success: true });
+  response.cookies.set({
+    name: AUTH_COOKIE_NAME,
+    value: "",
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 0,
+    path: "/",
+  });
+  return response;
 }
