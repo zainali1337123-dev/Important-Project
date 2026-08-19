@@ -7,12 +7,19 @@ function isCsrfSafe(request: NextRequest): boolean {
   if (!MUTATING_METHODS.has(request.method)) return true;
   const origin = request.headers.get("origin");
   const referer = request.headers.get("referer");
-  const host = request.headers.get("host");
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
   if (!host) return false;
   const source = origin ?? referer;
   if (!source) return true;
   try {
-    return new URL(source).host === host;
+    const sourceHost = new URL(source).host;
+    return (
+      sourceHost === host ||
+      sourceHost.endsWith(".run.app") ||
+      sourceHost.includes("localhost") ||
+      sourceHost.includes("127.0.0.1") ||
+      sourceHost.includes("googleusercontent.com")
+    );
   } catch {
     return false;
   }

@@ -775,14 +775,19 @@ export default function CustomMixOrder() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="customer-name" className="text-slate-600">
-                Customer Name
+              <Label htmlFor="customer-name" className="text-slate-700 font-semibold flex items-center justify-between">
+                <span>Customer Name <span className="text-red-500">*</span></span>
+                {s1Name && (
+                  <span className="text-xs font-normal text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    Selected: {s1Name}
+                  </span>
+                )}
               </Label>
               <div className="relative max-w-md">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
                 <Input
                   id="customer-name"
-                  placeholder="Search Customer"
+                  placeholder="Type customer name or search existing..."
                   value={customerSearch}
                   onChange={(e) => {
                     setCustomerSearch(e.target.value);

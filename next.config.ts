@@ -1,19 +1,18 @@
 import type { NextConfig } from "next";
 
 const securityHeaders = [
-  { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains; preload" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
   {
     key: "Content-Security-Policy",
     value: [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "font-src 'self' https://fonts.gstatic.com data:",
+      "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https:",
+      "font-src 'self' https://fonts.gstatic.com data: https:",
       "img-src 'self' data: blob: https:",
-      "connect-src 'self'",
+      "connect-src 'self' https: wss: ws: *",
+      "frame-ancestors *",
       "base-uri 'self'",
       "form-action 'self'",
     ].join("; "),
@@ -22,8 +21,18 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  // output: "standalone" is for Docker containers; remove or guard for Vercel
   output: process.env.DOCKER_BUILD === "true" ? "standalone" : undefined,
+  experimental: {
+    serverActions: {
+      allowedOrigins: [
+        "*.run.app",
+        "*.asia-east1.run.app",
+        "*.googleusercontent.com",
+        "localhost:3000",
+        "127.0.0.1:3000",
+      ],
+    },
+  },
   async headers() {
     return [
       {
