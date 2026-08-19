@@ -37,7 +37,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-const fmt = (n: number) => n.toLocaleString("en-PK");
+const fmt = (n?: number | null) => (n === null || n === undefined || isNaN(Number(n)) ? "0" : Number(n).toLocaleString("en-PK"));
 
 // ── Balance row returned by /api/reports/customer-balance ──
 interface BalanceRow {

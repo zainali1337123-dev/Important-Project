@@ -24,7 +24,7 @@ import {
 import { Loader2, RefreshCw, Warehouse } from "lucide-react";
 import { toast } from "sonner";
 
-const fmt = (n: number) => n.toLocaleString("en-PK");
+const fmt = (n?: number | null) => (n === null || n === undefined || isNaN(Number(n)) ? "0" : Number(n).toLocaleString("en-PK"));
 
 interface AvailableStockProps {
   /**

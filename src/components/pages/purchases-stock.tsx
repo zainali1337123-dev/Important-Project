@@ -65,8 +65,9 @@ import { pktToday } from "@/lib/pkt-date";
 
 const DEFAULT_BAG_WEIGHT = 50;
 
-function fmt(n: number) {
-  return n.toLocaleString("en-PK");
+function fmt(n?: number | null) {
+  if (n === null || n === undefined || isNaN(Number(n))) return "0";
+  return Number(n).toLocaleString("en-PK");
 }
 
 function stockKey(productId: number, locationId: number | null) {

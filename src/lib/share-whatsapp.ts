@@ -188,6 +188,8 @@ export function shareBillOnWhatsApp(info: BillShareInfo): ShareBillResult {
  * opening the PDF.
  */
 
+const fmtNum = (n?: number | null) => (n == null || isNaN(Number(n)) ? "0" : Number(n).toLocaleString("en-PK"));
+
 export function buildCustomerBillCaption(params: {
   customerName: string;
   generatedAt: string;
@@ -201,13 +203,13 @@ export function buildCustomerBillCaption(params: {
     "🧾 *Bill from DANISH CATTLE FEED*",
     `Customer: ${customerName || "—"}`,
     `Date: ${generatedAt}`,
-    `Total Bill: Rs. ${totalBill.toLocaleString("en-PK")}`,
-    `Cash Paid: Rs. ${cashPaid.toLocaleString("en-PK")}`,
+    `Total Bill: Rs. ${fmtNum(totalBill)}`,
+    `Cash Paid: Rs. ${fmtNum(cashPaid)}`,
   ];
   if (advancePayment && advancePayment > 0) {
-    lines.push(`Advance Paid: Rs. ${advancePayment.toLocaleString("en-PK")}`);
+    lines.push(`Advance Paid: Rs. ${fmtNum(advancePayment)}`);
   }
-  lines.push(`*Balance Due: Rs. ${balanceDue.toLocaleString("en-PK")}*`);
+  lines.push(`*Balance Due: Rs. ${fmtNum(balanceDue)}*`);
   lines.push("\n(PDF bill neeche attach karni hai 👆)");
   return lines.join("\n");
 }
@@ -228,12 +230,12 @@ export function buildMixBillCaption(params: {
     `Date: ${orderDate}`,
   ];
   if (driverName) lines.push(`Driver: ${driverName}`);
-  lines.push(`*Grand Total: Rs. ${grandTotal.toLocaleString("en-PK")}*`);
+  lines.push(`*Grand Total: Rs. ${fmtNum(grandTotal)}*`);
   if (cashReceived !== undefined) {
-    const change = cashReceived - grandTotal;
-    lines.push(`Cash Received: Rs. ${cashReceived.toLocaleString("en-PK")}`);
+    const change = (Number(cashReceived) || 0) - (Number(grandTotal) || 0);
+    lines.push(`Cash Received: Rs. ${fmtNum(cashReceived)}`);
     if (change >= 0) {
-      lines.push(`Change: Rs. ${change.toLocaleString("en-PK")}`);
+      lines.push(`Change: Rs. ${fmtNum(change)}`);
     }
   }
   lines.push("\n(PDF bill neeche attach karni hai 👆)");
@@ -259,9 +261,9 @@ export function buildPurchaseBillCaption(params: {
     `Date: ${date}`,
   ];
   if (productName) lines.push(`Product: ${productName}`);
-  lines.push(`Total Amount: Rs. ${totalAmount.toLocaleString("en-PK")}`);
-  lines.push(`Cash Paid: Rs. ${cashPaid.toLocaleString("en-PK")}`);
-  lines.push(`Pending: Rs. ${pending.toLocaleString("en-PK")}`);
+  lines.push(`Total Amount: Rs. ${fmtNum(totalAmount)}`);
+  lines.push(`Cash Paid: Rs. ${fmtNum(cashPaid)}`);
+  lines.push(`Pending: Rs. ${fmtNum(pending)}`);
   lines.push(`Status: *${status}*`);
   lines.push("\n(PDF bill neeche attach karni hai 👆)");
   return lines.join("\n");
@@ -285,8 +287,8 @@ export function buildPurchaseReceiptCaption(params: {
     `Date: ${date}`,
   ];
   if (productName) lines.push(`Product: ${productName}`);
-  lines.push(`*Amount Paid: Rs. ${cashPaid.toLocaleString("en-PK")}*`);
-  lines.push(`Pending: Rs. ${pending.toLocaleString("en-PK")}`);
+  lines.push(`*Amount Paid: Rs. ${fmtNum(cashPaid)}*`);
+  lines.push(`Pending: Rs. ${fmtNum(pending)}`);
   lines.push(`Status: *${status}*`);
   lines.push("\n(PDF bill neeche attach karni hai 👆)");
   return lines.join("\n");

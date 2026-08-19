@@ -29,23 +29,41 @@ const quickLinks = [
   { label: "Manage Products & Rates", page: "manage-products", icon: Settings },
 ];
 
-function formatRs(n: number) {
-  return n.toLocaleString("en-PK");
+function formatRs(n?: number | null) {
+  if (n === null || n === undefined || isNaN(Number(n))) return "0";
+  return Number(n).toLocaleString("en-PK");
 }
 
 interface Metrics {
-  salesTodayCount: number;
-  billedToday: number;
-  cashCollectedToday: number;
-  expensesToday: number;
-  totalCustomers: number;
-  totalOutstanding: number;
-  overCreditLimitCount: number;
+  salesTodayCount?: number;
+  billedToday?: number;
+  cashCollectedToday?: number;
+  expensesToday?: number;
+  totalCustomers?: number;
+  totalOutstanding?: number;
+  overCreditLimitCount?: number;
+  todaySalesAmount?: number;
+  todayCashReceived?: number;
+  todayExpenses?: number;
+  totalReceivable?: number;
+  totalAdvance?: number;
+  todaySalesCount?: number;
 }
 
-const defaultMetrics: Metrics = {
-  salesTodayCount: 0, billedToday: 0, cashCollectedToday: 0, expensesToday: 0,
-  totalCustomers: 0, totalOutstanding: 0, overCreditLimitCount: 0,
+const defaultMetrics: Required<Metrics> = {
+  salesTodayCount: 0,
+  billedToday: 0,
+  cashCollectedToday: 0,
+  expensesToday: 0,
+  totalCustomers: 0,
+  totalOutstanding: 0,
+  overCreditLimitCount: 0,
+  todaySalesAmount: 0,
+  todayCashReceived: 0,
+  todayExpenses: 0,
+  totalReceivable: 0,
+  totalAdvance: 0,
+  todaySalesCount: 0,
 };
 
 type CardKey = "sales-today" | "billed-today" | "cash-collected" | "expenses-today" | "customers" | "outstanding" | "over-credit";
@@ -161,7 +179,21 @@ export default function Dashboard() {
   // Use PKT date — matches server-side pktToday()
   const pktDate = useMemo(() => pktToday(), []);
 
-  const metricsData: Metrics = metrics ?? defaultMetrics;
+  const metricsData: Required<Metrics> = {
+    salesTodayCount: metrics?.salesTodayCount ?? metrics?.todaySalesCount ?? 0,
+    billedToday: metrics?.billedToday ?? metrics?.todaySalesAmount ?? 0,
+    cashCollectedToday: metrics?.cashCollectedToday ?? metrics?.todayCashReceived ?? 0,
+    expensesToday: metrics?.expensesToday ?? metrics?.todayExpenses ?? 0,
+    totalCustomers: metrics?.totalCustomers ?? 0,
+    totalOutstanding: metrics?.totalOutstanding ?? metrics?.totalReceivable ?? 0,
+    overCreditLimitCount: metrics?.overCreditLimitCount ?? 0,
+    todaySalesAmount: metrics?.todaySalesAmount ?? metrics?.billedToday ?? 0,
+    todayCashReceived: metrics?.todayCashReceived ?? metrics?.cashCollectedToday ?? 0,
+    todayExpenses: metrics?.todayExpenses ?? metrics?.expensesToday ?? 0,
+    totalReceivable: metrics?.totalReceivable ?? metrics?.totalOutstanding ?? 0,
+    totalAdvance: metrics?.totalAdvance ?? 0,
+    todaySalesCount: metrics?.todaySalesCount ?? metrics?.salesTodayCount ?? 0,
+  };
 
   // Debounce search input + reset to page 1 on new search
   useEffect(() => {

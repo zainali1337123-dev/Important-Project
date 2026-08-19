@@ -584,7 +584,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8.5);
     doc.setTextColor(...C_GRAY);
-    doc.text(`As Rate/Bag (${actualTotalBags.toLocaleString("en-PK", { maximumFractionDigits: 2 })} bags):`, labelX, ty);
+    doc.text(`As Rate/Bag (${(Number(actualTotalBags) || 0).toLocaleString("en-PK", { maximumFractionDigits: 2 })} bags):`, labelX, ty);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(...C_DARK);
     doc.text(asRatePerBagStr, valX, ty, { align: "right" });
@@ -609,7 +609,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
     doc.text("Advance Paid:", labelX, ty);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(...C_GREEN);
-    doc.text(`Rs. ${advancePayment.toLocaleString("en-PK")}`, valX, ty, { align: "right" });
+    doc.text(`Rs. ${(Number(advancePayment) || 0).toLocaleString("en-PK")}`, valX, ty, { align: "right" });
   }
 
   // Divider

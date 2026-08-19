@@ -76,7 +76,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const fmt = (n: number) => n.toLocaleString("en-PK");
+const fmt = (n?: number | null) => (n === null || n === undefined || isNaN(Number(n)) ? "0" : Number(n).toLocaleString("en-PK"));
 
 export default function DailyEntryPage() {
   const today = pktToday();

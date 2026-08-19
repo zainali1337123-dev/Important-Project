@@ -39,8 +39,9 @@ import { pktToday } from "@/lib/pkt-date";
 import { useReconciliation } from "@/hooks/queries";
 import { downloadAllExcelPaged, type Col } from "@/lib/download-excel";
 
-function formatRs(n: number) {
-  return n.toLocaleString("en-PK");
+function formatRs(n?: number | null) {
+  if (n === null || n === undefined || isNaN(Number(n))) return "0";
+  return Number(n).toLocaleString("en-PK");
 }
 
 /* ─── Types ─── */

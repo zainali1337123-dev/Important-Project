@@ -435,7 +435,7 @@ export default function CashManagementPage() {
     }
   };
 
-  const formatRs = (val: number) => val.toLocaleString("en-PK", { minimumFractionDigits: 0 });
+  const formatRs = (val?: number | null) => (val === null || val === undefined || isNaN(Number(val)) ? "0" : Number(val).toLocaleString("en-PK", { minimumFractionDigits: 0 }));
 
   // ─── Loading state: show skeletons instead of blank spinner ───
   const initialLoading = accountsLoading && balancesLoading && transfersLoading;

@@ -29,7 +29,24 @@ export async function GET() {
     const totalAdvance = (customers || []).reduce((acc, c) => acc + (Number(c.advance_payment) || 0), 0);
     const totalStockBags = (stock || []).reduce((acc, s) => acc + (Number(s.stock_quantity) || 0), 0);
 
+    const totalSalesCount = (todaySales || []).length;
+    const totalCustomersCount = (customers || []).length;
+    const overCreditCount = (customers || []).filter((c: any) => {
+      const bal = Number(c.opening_balance) || 0;
+      const limit = Number(c.credit_limit) || 0;
+      return limit > 0 && bal > limit;
+    }).length;
+
     return NextResponse.json({
+      // Component expected format
+      salesTodayCount: totalSalesCount,
+      billedToday: totalSalesAmount,
+      cashCollectedToday: totalCashReceived,
+      expensesToday: totalExpenses,
+      totalCustomers: totalCustomersCount,
+      totalOutstanding: totalReceivable,
+      overCreditLimitCount: overCreditCount,
+      // Alternate API format
       todaySalesAmount: totalSalesAmount,
       todayCashReceived: totalCashReceived,
       todayExpenses: totalExpenses,
@@ -37,10 +54,17 @@ export async function GET() {
       totalReceivable,
       totalAdvance,
       totalStockBags,
-      todaySalesCount: (todaySales || []).length,
+      todaySalesCount: totalSalesCount,
     });
   } catch (err: any) {
     return NextResponse.json({
+      salesTodayCount: 0,
+      billedToday: 0,
+      cashCollectedToday: 0,
+      expensesToday: 0,
+      totalCustomers: 0,
+      totalOutstanding: 0,
+      overCreditLimitCount: 0,
       todaySalesAmount: 0,
       todayCashReceived: 0,
       todayExpenses: 0,

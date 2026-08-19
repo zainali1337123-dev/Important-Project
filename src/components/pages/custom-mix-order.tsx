@@ -66,8 +66,9 @@ import { downloadExcel } from "@/lib/download-excel";
 const PAST_PAGE_SIZE = 10;
 
 /* ─── Helpers ─── */
-function fmtRs(n: number) {
-  return n.toLocaleString("en-PK");
+function fmtRs(n?: number | null) {
+  if (n === null || n === undefined || isNaN(Number(n))) return "0";
+  return Number(n).toLocaleString("en-PK");
 }
 
 function printMixBill(order: { id: string | number; customer: string; date: string; driverName?: string; driverRent?: number }, items: { product: string; weight_kg: number; rate_per_kg: number; amount: number; bags?: number | null; rate_per_bag?: number | null; bag_amount?: number | null; rate_basis_weight?: number | null; quoted_rate?: number | null }[], totalWeight: number, totalAmount: number, totalBagAmount: number = 0) {

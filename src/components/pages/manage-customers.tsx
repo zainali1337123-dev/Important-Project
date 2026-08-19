@@ -43,7 +43,7 @@ import {
 import { useCustomersPaginated, useCustomerBalance, useInvalidateAfterMutation } from "@/hooks/queries";
 import { downloadAllJson } from "@/lib/download-json";
 
-const fmt = (n: number) => n.toLocaleString("en-PK");
+const fmt = (n?: number | null) => (n === null || n === undefined || isNaN(Number(n)) ? "0" : Number(n).toLocaleString("en-PK"));
 const PAGE_SIZE = 10;
 
 // ─── Balance row from /api/reports/customer-balance ───

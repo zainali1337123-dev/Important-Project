@@ -43,7 +43,7 @@ import {
 } from "@/hooks/queries";
 import { downloadExcel } from "@/lib/download-excel";
 
-const fmt = (n: number) => n.toLocaleString("en-PK");
+const fmt = (n?: number | null) => (n === null || n === undefined || isNaN(Number(n)) ? "0" : Number(n).toLocaleString("en-PK"));
 const PAGE_SIZE = 10;
 
 /** Small helper: renders Rs. value + English words below */
