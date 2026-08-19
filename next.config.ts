@@ -21,8 +21,9 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  output: "standalone",
   reactStrictMode: true,
+  // output: "standalone" is for Docker containers; remove or guard for Vercel
+  output: process.env.DOCKER_BUILD === "true" ? "standalone" : undefined,
   async headers() {
     return [
       {
