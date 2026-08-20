@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { signAuthToken, verifyAuthToken, AUTH_COOKIE_NAME, COOKIE_MAX_AGE } from "@/lib/auth/cookie-sign";
+import { getSupabaseServerClient } from "@/lib/supabase";
 
 const MASTER_EMAIL = "zain@gmail.com";
 const MASTER_PASSWORD = "zain123ali";
@@ -40,15 +41,45 @@ export async function POST(request: NextRequest) {
     const normalizedEmail = String(email).trim().toLowerCase();
     const providedPassword = String(password).trim();
 
-    if (normalizedEmail !== MASTER_EMAIL || providedPassword !== MASTER_PASSWORD) {
-      return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
+    let userPayload: { id: string; name: string; email: string } | null = null;
+
+    // 1. Direct master credentials match
+    if (normalizedEmail === MASTER_EMAIL && providedPassword === MASTER_PASSWORD) {
+      userPayload = {
+        id: "usr_zain",
+        name: "Zain Ali",
+        email: MASTER_EMAIL,
+      };
+    } else {
+      // 2. Supabase Auth fallback with strict 4s timeout
+      try {
+        const supabase = getSupabaseServerClient();
+        const timeoutPromise = new Promise<{ data: { user: null }; error: Error }>((_, reject) =>
+          setTimeout(() => reject(new Error("Supabase auth timeout")), 4000)
+        );
+
+        const authPromise = supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password: providedPassword,
+        });
+
+        const { data, error } = await Promise.race([authPromise, timeoutPromise]);
+
+        if (!error && data?.user) {
+          userPayload = {
+            id: data.user.id,
+            name: data.user.user_metadata?.name || data.user.email?.split("@")[0] || "User",
+            email: data.user.email || normalizedEmail,
+          };
+        }
+      } catch (err: any) {
+        console.warn("[API Auth] Supabase check:", err?.message);
+      }
     }
 
-    const userPayload = {
-      id: "usr_zain",
-      name: "Zain Ali",
-      email: MASTER_EMAIL,
-    };
+    if (!userPayload) {
+      return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
+    }
 
     const token = await signAuthToken(userPayload);
 
@@ -68,7 +99,8 @@ export async function POST(request: NextRequest) {
     });
 
     return response;
-  } catch (error) {
-    return NextResponse.json({ error: "Internal server error during login" }, { status: 500 });
+  } catch (error: any) {
+    console.error("[API Auth] Error:", error);
+    return NextResponse.json({ error: error?.message || "Internal server error during login" }, { status: 500 });
   }
 }
