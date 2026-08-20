@@ -32,6 +32,11 @@ interface LocationSelectProps {
  *   <LocationSelect value={locId} onChange={setLocId} />
  *   <LocationSelect value={locId} onChange={setLocId} showAllOption />
  */
+const DEFAULT_LOCATIONS: Location[] = [
+  { id: 2, name: "Shop", created_at: "2026-01-01" },
+  { id: 1, name: "Farm", created_at: "2026-01-01" },
+];
+
 export function LocationSelect({
   value,
   onChange,
@@ -39,8 +44,7 @@ export function LocationSelect({
   showAllOption = false,
   disabled = false,
 }: LocationSelectProps) {
-  const [locations, setLocations] = React.useState<Location[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [locations, setLocations] = React.useState<Location[]>(DEFAULT_LOCATIONS);
 
   React.useEffect(() => {
     let mounted = true;
@@ -49,20 +53,15 @@ export function LocationSelect({
         const res = await fetch("/api/locations", { cache: "no-store" });
         if (!res.ok) throw new Error("Failed to load locations");
         const data = await res.json();
-        if (mounted && Array.isArray(data.locations)) {
+        if (mounted && Array.isArray(data.locations) && data.locations.length > 0) {
           setLocations(data.locations);
-          // If no value set, default to the project default (Shop, id=2).
-          // Fall back to the first available location only if Shop isn't
-          // in the list (defensive — should never happen in practice).
-          if (!value && data.locations.length > 0) {
+          if (!value) {
             const shop = data.locations.find((l: Location) => l.id === DEFAULT_LOCATION_ID);
             onChange(shop ? shop.id : data.locations[0].id);
           }
         }
       } catch (err) {
         console.error("LocationSelect: failed to load locations", err);
-      } finally {
-        if (mounted) setLoading(false);
       }
     })();
     return () => {
@@ -70,19 +69,11 @@ export function LocationSelect({
     };
   }, []);
 
-  if (loading) {
-    return (
-      <Select disabled>
-        <SelectTrigger className={className} size="sm">
-          <SelectValue placeholder="Loading..." />
-        </SelectTrigger>
-      </Select>
-    );
-  }
+  const effectiveValue = value !== undefined && value !== null ? String(value) : "2";
 
   return (
     <Select
-      value={value ? String(value) : undefined}
+      value={effectiveValue}
       onValueChange={(v) => onChange(Number(v))}
       disabled={disabled}
     >

@@ -26,7 +26,15 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export async function POST(request: NextRequest) {
+  return handleStockUpsert(request);
+}
+
 export async function PUT(request: NextRequest) {
+  return handleStockUpsert(request);
+}
+
+async function handleStockUpsert(request: NextRequest) {
   try {
     const supabase = getSupabaseServerClient();
     const body = await request.json();
@@ -36,49 +44,50 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Product ID is required" }, { status: 400 });
     }
 
-    // Upsert stock record
-    const { data, error } = await supabase
+    const locId = location_id !== undefined && location_id !== null ? Number(location_id) : 2;
+    const qty = Number(stock_quantity) || 0;
+    const bw = last_bag_weight_kg ? Number(last_bag_weight_kg) : 40;
+
+    // Check for existing record
+    const { data: existing } = await supabase
       .from("product_stock")
-      .upsert(
-        {
-          product_id,
-          location_id: location_id ?? 2,
-          stock_quantity: Number(stock_quantity) || 0,
-          last_bag_weight_kg: last_bag_weight_kg ? Number(last_bag_weight_kg) : 40,
-        },
-        { onConflict: "product_id,location_id" }
-      )
-      .select()
-      .single();
+      .select("id")
+      .eq("product_id", product_id)
+      .eq("location_id", locId)
+      .maybeSingle();
 
-    if (error) {
-      // Fallback: try update then insert if conflict constraint is named differently
-      const { data: existing } = await supabase
+    if (existing) {
+      const { data, error } = await supabase
         .from("product_stock")
-        .select("id")
-        .eq("product_id", product_id)
-        .eq("location_id", location_id ?? 2)
-        .maybeSingle();
+        .update({
+          stock_quantity: qty,
+          last_bag_weight_kg: bw,
+        })
+        .eq("id", existing.id)
+        .select()
+        .single();
 
-      if (existing) {
-        await supabase
-          .from("product_stock")
-          .update({
-            stock_quantity: Number(stock_quantity) || 0,
-            last_bag_weight_kg: last_bag_weight_kg ? Number(last_bag_weight_kg) : 40,
-          })
-          .eq("id", existing.id);
-      } else {
-        await supabase.from("product_stock").insert({
-          product_id,
-          location_id: location_id ?? 2,
-          stock_quantity: Number(stock_quantity) || 0,
-          last_bag_weight_kg: last_bag_weight_kg ? Number(last_bag_weight_kg) : 40,
-        });
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
       }
-    }
+      return NextResponse.json({ success: true, stock: data });
+    } else {
+      const { data, error } = await supabase
+        .from("product_stock")
+        .insert({
+          product_id,
+          location_id: locId,
+          stock_quantity: qty,
+          last_bag_weight_kg: bw,
+        })
+        .select()
+        .single();
 
-    return NextResponse.json({ success: true, stock: data });
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      return NextResponse.json({ success: true, stock: data });
+    }
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

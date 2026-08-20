@@ -106,8 +106,6 @@ export async function POST(request: NextRequest) {
         cash_received: index === 0 ? Number(cash_received) || 0 : 0,
         location_id: 2,
         mix_order_id: String(mixOrder.id),
-        rate_basis_weight: it.rate_basis_weight ?? null,
-        quoted_rate: it.quoted_rate ?? null,
         entered_by: "Zain",
       }));
 

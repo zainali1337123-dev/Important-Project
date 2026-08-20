@@ -80,28 +80,46 @@ export async function POST(request: NextRequest) {
     const fare = Number(rickshaw_fare) || 0;
     const cash = Number(cash_received) || 0;
 
+    // Helper to sanitize payload for Supabase sales table
+    const cleanSaleRow = (row: Record<string, any>) => {
+      const clean: Record<string, any> = {
+        customer_id: row.customer_id,
+        product_id: row.product_id,
+        quantity: row.quantity,
+        rate_per_bag: row.rate_per_bag,
+        unit_type: row.unit_type || "bags",
+        bag_weight_kg: row.bag_weight_kg || 40,
+        location_id: row.location_id || 2,
+        sale_date: row.sale_date,
+        transaction_group_id: row.transaction_group_id || null,
+        entered_by: "Zain",
+        rickshaw_fare: row.rickshaw_fare || 0,
+        rickshaw_driver_name: row.rickshaw_driver_name || null,
+        cash_received: row.cash_received || 0,
+      };
+      return clean;
+    };
+
     // Case 1: Multi-item sale (from Cart in Daily Entry)
     if (items && Array.isArray(items) && items.length > 0) {
       const groupId = transaction_group_id || `group_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-      const insertRows = items.map((item: any, idx: number) => ({
-        customer_id: Number(customer_id),
-        product_id: Number(item.product_id),
-        quantity: Number(item.quantity) || 0,
-        rate_per_bag: Number(item.rate_per_bag || item.rate) || 0,
-        unit_type: item.unit_type || "bags",
-        bag_weight_kg: item.bag_weight_kg ? Number(item.bag_weight_kg) : 40,
-        location_id: locId,
-        sale_date: effectiveDate,
-        transaction_group_id: groupId,
-        entered_by: "Zain",
-        // Assign rickshaw fare, driver, and cash received to the first line of the multi-item group
-        rickshaw_fare: idx === 0 ? fare : 0,
-        rickshaw_driver_name: idx === 0 ? driverName : null,
-        cash_received: idx === 0 ? cash : 0,
-        rate_basis_weight: item.rate_basis_weight ? Number(item.rate_basis_weight) : null,
-        quoted_rate: item.quoted_rate ? Number(item.quoted_rate) : null,
-      }));
+      const insertRows = items.map((item: any, idx: number) =>
+        cleanSaleRow({
+          customer_id: Number(customer_id),
+          product_id: Number(item.product_id),
+          quantity: Number(item.quantity) || 0,
+          rate_per_bag: Number(item.rate_per_bag || item.rate) || 0,
+          unit_type: item.unit_type || "bags",
+          bag_weight_kg: item.bag_weight_kg ? Number(item.bag_weight_kg) : 40,
+          location_id: locId,
+          sale_date: effectiveDate,
+          transaction_group_id: groupId,
+          rickshaw_fare: idx === 0 ? fare : 0,
+          rickshaw_driver_name: idx === 0 ? driverName : null,
+          cash_received: idx === 0 ? cash : 0,
+        })
+      );
 
       const { data, error } = await supabase.from("sales").insert(insertRows).select();
 
@@ -126,7 +144,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Customer ID and Product ID are required" }, { status: 400 });
     }
 
-    const insertPayload = {
+    const insertPayload = cleanSaleRow({
       customer_id: Number(customer_id),
       product_id: Number(product_id),
       quantity: Number(quantity) || 0,
@@ -138,11 +156,8 @@ export async function POST(request: NextRequest) {
       unit_type: unit_type || "bags",
       bag_weight_kg: bag_weight_kg ? Number(bag_weight_kg) : 40,
       rickshaw_driver_name: driverName,
-      rate_basis_weight: rate_basis_weight ? Number(rate_basis_weight) : null,
-      quoted_rate: quoted_rate ? Number(quoted_rate) : null,
       transaction_group_id: transaction_group_id || null,
-      entered_by: "Zain",
-    };
+    });
 
     const { data, error } = await supabase.from("sales").insert([insertPayload]).select().single();
 
