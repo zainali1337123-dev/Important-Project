@@ -772,7 +772,7 @@ export default function LabourKhataPage() {
         title="Jump to"
         items={[
           { id: "section-metrics", label: "Overview", icon: BarChart3 },
-          { id: "section-register", label: "Register New Labour", icon: UserPlus, iconColor: "text-emerald-600" },
+          { id: "section-register", label: "Register New Labour", icon: UserPlus, iconColor: "text-[#087F83]" },
           { id: "section-daily-wage", label: "Daily Wage Entry", icon: CalendarDays, iconColor: "text-blue-600" },
           { id: "section-add-payment", label: "Add Payment", icon: Wallet, iconColor: "text-amber-600" },
           { id: "section-history", label: "Payment History", icon: Calendar },

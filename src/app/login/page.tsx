@@ -100,23 +100,23 @@ export default function LoginPage() {
   };
 
   return (
-    <div id="login-container" className="min-h-screen flex items-center justify-center bg-slate-900 px-4 py-8 relative overflow-hidden">
+    <div id="login-container" className="min-h-screen flex items-center justify-center bg-[#004B50] px-4 py-8 relative overflow-hidden">
       {/* Subtle background glow */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl" />
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-[#16A3A8]/20 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-[#087F83]/30 rounded-full blur-3xl" />
       </div>
 
-      <Card id="login-card" className="w-full max-w-md relative z-10 border-slate-800 bg-slate-900/90 text-white shadow-2xl backdrop-blur-xl">
+      <Card id="login-card" className="w-full max-w-md relative z-10 border-[#00383C] bg-white text-[#173337] shadow-2xl rounded-2xl">
         <CardHeader className="text-center space-y-3 pb-2 pt-6">
-          <div className="mx-auto w-14 h-14 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
+          <div className="mx-auto w-14 h-14 bg-[#087F83] border border-[#16A3A8]/40 rounded-2xl flex items-center justify-center shadow-lg shadow-[#087F83]/30">
             <span className="text-2xl" role="img" aria-label="cattle">🐄</span>
           </div>
           <div>
-            <CardTitle className="text-2xl font-bold tracking-tight text-white">
+            <CardTitle className="text-2xl font-bold tracking-tight text-[#173337]">
               Danish Cattle Feed
             </CardTitle>
-            <CardDescription className="text-slate-400 mt-1 text-sm">
+            <CardDescription className="text-[#6B7C7F] mt-1 text-sm">
               Daily Register &amp; Accounts Management
             </CardDescription>
           </div>
@@ -127,15 +127,15 @@ export default function LoginPage() {
             {errorMessage && (
               <div
                 id="login-error-alert"
-                className="p-3 rounded-lg bg-red-500/15 border border-red-500/30 flex items-start gap-2.5 text-red-300 text-sm animate-in fade-in"
+                className="p-3 rounded-lg bg-red-50 border border-red-200 flex items-start gap-2.5 text-red-600 text-sm animate-in fade-in"
               >
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                 <span className="leading-snug">{errorMessage}</span>
               </div>
             )}
 
             <div className="space-y-1.5">
-              <Label htmlFor="login-email" className="text-sm font-medium text-slate-300">
+              <Label htmlFor="login-email" className="text-sm font-semibold text-[#173337]">
                 Email Address
               </Label>
               <Input
@@ -147,7 +147,7 @@ export default function LoginPage() {
                   setEmail(e.target.value);
                   if (errorMessage) setErrorMessage(null);
                 }}
-                className="h-11 bg-slate-800/80 border-slate-700 text-white placeholder:text-slate-500 focus:border-emerald-500 focus:ring-emerald-500/20"
+                className="h-11 bg-white border-[#DCE5E5] text-[#173337] placeholder:text-[#6B7C7F] focus:border-[#087F83] focus:ring-[#087F83]/20"
                 autoComplete="email"
                 disabled={loading}
                 required
@@ -155,7 +155,7 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="login-password" className="text-sm font-medium text-slate-300">
+              <Label htmlFor="login-password" className="text-sm font-semibold text-[#173337]">
                 Password
               </Label>
               <div className="relative">
@@ -168,7 +168,7 @@ export default function LoginPage() {
                     setPassword(e.target.value);
                     if (errorMessage) setErrorMessage(null);
                   }}
-                  className="h-11 bg-slate-800/80 border-slate-700 text-white placeholder:text-slate-500 focus:border-emerald-500 focus:ring-emerald-500/20 pr-12"
+                  className="h-11 bg-white border-[#DCE5E5] text-[#173337] placeholder:text-[#6B7C7F] focus:border-[#087F83] focus:ring-[#087F83]/20 pr-12"
                   autoComplete="current-password"
                   disabled={loading}
                   required
@@ -177,7 +177,7 @@ export default function LoginPage() {
                   type="button"
                   id="toggle-password-btn"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors p-1"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B7C7F] hover:text-[#173337] transition-colors p-1"
                   tabIndex={-1}
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
@@ -190,7 +190,7 @@ export default function LoginPage() {
               type="submit"
               id="login-submit-btn"
               disabled={loading}
-              className="w-full h-11 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-lg shadow-emerald-600/25 transition-all mt-2 cursor-pointer"
+              className="w-full h-11 bg-[#087F83] hover:bg-[#004B50] text-white font-semibold shadow-md shadow-[#087F83]/25 transition-all mt-2 cursor-pointer"
             >
               {loading ? (
                 <div className="flex items-center gap-2">
@@ -206,8 +206,8 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-center gap-2 text-xs text-slate-500">
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+          <div className="mt-6 pt-4 border-t border-[#DCE5E5] flex items-center justify-center gap-2 text-xs text-[#6B7C7F]">
+            <ShieldCheck className="w-4 h-4 text-[#087F83]" />
             <span>Secure System Access</span>
           </div>
         </CardContent>

@@ -234,7 +234,7 @@ export default function EditCustomerPage() {
         title="Jump to"
         items={[
           { id: "section-update-ob", label: "Update Opening Balance", icon: UserPen },
-          { id: "section-quick-edit", label: "Quick Edit All", icon: Users, iconColor: "text-emerald-600" },
+          { id: "section-quick-edit", label: "Quick Edit All", icon: Users, iconColor: "text-[#087F83]" },
         ]}
       />
 

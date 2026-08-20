@@ -41,75 +41,84 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  --color-deep-teal: #004B50;
+  --color-primary-teal: #087F83;
+  --color-bright-teal: #16A3A8;
+  --color-very-light-teal: #E8F4F4;
+  --color-page-bg: #F4F7F7;
+  --color-text-main: #173337;
+  --color-text-muted: #6B7C7F;
+  --color-warning-expense: #C28A24;
 }
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: #F4F7F7;
+  --foreground: #173337;
+  --card: #FFFFFF;
+  --card-foreground: #173337;
+  --popover: #FFFFFF;
+  --popover-foreground: #173337;
+  --primary: #087F83;
+  --primary-foreground: #FFFFFF;
+  --secondary: #E8F4F4;
+  --secondary-foreground: #173337;
+  --muted: #E8F4F4;
+  --muted-foreground: #6B7C7F;
+  --accent: #E8F4F4;
+  --accent-foreground: #087F83;
+  --destructive: #DC2626;
+  --border: #DCE5E5;
+  --input: #DCE5E5;
+  --ring: #16A3A8;
+  --chart-1: #087F83;
+  --chart-2: #16A3A8;
+  --chart-3: #004B50;
+  --chart-4: #C28A24;
+  --chart-5: #6B7C7F;
+  --sidebar: #004B50;
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #16A3A8;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #087F83;
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: #003B3F;
+  --sidebar-ring: #16A3A8;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #004B50;
+  --foreground: #F4F7F7;
+  --card: #003B3F;
+  --card-foreground: #F4F7F7;
+  --popover: #003B3F;
+  --popover-foreground: #F4F7F7;
+  --primary: #16A3A8;
+  --primary-foreground: #FFFFFF;
+  --secondary: #087F83;
+  --secondary-foreground: #FFFFFF;
+  --muted: #087F83;
+  --muted-foreground: #E8F4F4;
+  --accent: #087F83;
+  --accent-foreground: #FFFFFF;
+  --destructive: #EF4444;
+  --border: #005E64;
+  --input: #005E64;
+  --ring: #16A3A8;
+  --chart-1: #16A3A8;
+  --chart-2: #087F83;
+  --chart-3: #E8F4F4;
+  --chart-4: #C28A24;
+  --chart-5: #6B7C7F;
+  --sidebar: #003B3F;
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #16A3A8;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #087F83;
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: #002B2E;
+  --sidebar-ring: #16A3A8;
 }
 
 @layer base {
@@ -117,9 +126,35 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    background-color: #F4F7F7;
+    color: #173337;
   }
 }
+
+/* Custom theme utilities */
+.bg-deep-teal { background-color: #004B50; }
+.text-deep-teal { color: #004B50; }
+.border-deep-teal { border-color: #004B50; }
+
+.bg-primary-teal { background-color: #087F83; }
+.text-primary-teal { color: #087F83; }
+.border-primary-teal { border-color: #087F83; }
+
+.bg-bright-teal { background-color: #16A3A8; }
+.text-bright-teal { color: #16A3A8; }
+.border-bright-teal { border-color: #16A3A8; }
+
+.bg-very-light-teal { background-color: #E8F4F4; }
+.text-very-light-teal { color: #E8F4F4; }
+.border-very-light-teal { border-color: #E8F4F4; }
+
+.bg-main-page { background-color: #F4F7F7; }
+.text-main-text { color: #173337; }
+.text-muted-text { color: #6B7C7F; }
+
+.bg-warning-expense { background-color: #C28A24; }
+.text-warning-expense { color: #C28A24; }
+.border-warning-expense { border-color: #C28A24; }
 
 /* Hide scrollbar but keep scroll behaviour (used by QuickNav horizontal pill bar) */
 .no-scrollbar::-webkit-scrollbar {
@@ -136,10 +171,6 @@ html {
 }
 
 /* ─── Noto Nastaliq Urdu — for PDF bill rendering via canvas ─── */
-/* Loaded by pdf-urdu.ts helper so Urdu text renders correctly in
-   customer/purchase/mix/buy-product PDF bills. Browser handles
-   Arabic shaping + RTL ordering natively when drawing to canvas,
-   then we embed the canvas as an image into the jsPDF document. */
 @font-face {
   font-family: "Noto Nastaliq Urdu";
   src: url("/fonts/NotoNastaliqUrdu-Regular.ttf") format("truetype");

@@ -263,7 +263,7 @@ export default function DatabaseManagementPage() {
           items={[
             { id: "section-backup-choose", label: "1. Choose Backup", icon: Calendar },
             { id: "section-backup-inside", label: "2. What's Inside", icon: FileJson },
-            { id: "section-backup-download", label: "3. Download", icon: Download, iconColor: "text-emerald-600" },
+            { id: "section-backup-download", label: "3. Download", icon: Download, iconColor: "text-[#087F83]" },
             { id: "section-restore", label: "Restore Section", icon: Upload, iconColor: "text-amber-600" },
             { id: "section-restore-choose", label: "1. Select File", icon: FileUp },
             { id: "section-restore-mode", label: "2. Restore Mode", icon: ShieldCheck },

@@ -29,7 +29,7 @@ import {
 function PageLoader() {
   return (
     <div className="flex items-center justify-center py-20">
-      <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+      <Loader2 className="w-8 h-8 animate-spin text-[#087F83]" />
     </div>
   );
 }
@@ -136,8 +136,8 @@ export default function MainPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+      <div className="min-h-screen flex items-center justify-center bg-[#004B50]">
+        <Loader2 className="w-8 h-8 animate-spin text-[#16A3A8]" />
       </div>
     );
   }
@@ -149,12 +149,12 @@ export default function MainPage() {
   const PageComponent = pageMap[activePage] || Dashboard;
 
   return (
-    <div id="app-root" className="min-h-screen bg-slate-50">
+    <div id="app-root" className="min-h-screen bg-[#F4F7F7] text-[#173337]">
       {/* Mobile hamburger button */}
       <button
         id="mobile-menu-toggle"
         onClick={() => setMobileOpen(!mobileOpen)}
-        className="fixed top-4 left-4 z-50 lg:hidden bg-white text-slate-800 p-2.5 rounded-xl shadow-lg border border-slate-200 cursor-pointer"
+        className="fixed top-4 left-4 z-50 lg:hidden bg-white text-[#173337] p-2.5 rounded-xl shadow-lg border border-[#DCE5E5] cursor-pointer"
         aria-label="Toggle menu"
       >
         {mobileOpen ? <X size={20} /> : <Menu size={20} />}
@@ -167,24 +167,24 @@ export default function MainPage() {
         />
       )}
 
-      {/* Sidebar Navigation */}
+      {/* Sidebar Navigation - Deep Teal #004B50 */}
       <aside
         id="app-sidebar"
         className={cn(
           "fixed top-0 left-0 z-40 h-screen w-64 transition-transform duration-200 lg:translate-x-0",
-          "bg-gradient-to-b from-[#101a2e] to-[#0b1322] border-r border-white/[0.06]",
+          "bg-[#004B50] border-r border-[#00383C] text-white",
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         <div className="p-4 h-screen flex flex-col overflow-hidden">
           {/* Logo Header */}
-          <div className="flex items-center gap-3 pb-4 mb-4 border-b border-white/[0.08] shrink-0">
-            <div className="w-10 h-10 min-w-[2.5rem] rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-lg shadow-lg shadow-emerald-500/30">
+          <div className="flex items-center gap-3 pb-4 mb-4 border-b border-white/10 shrink-0">
+            <div className="w-10 h-10 min-w-[2.5rem] rounded-xl bg-[#087F83] border border-[#16A3A8]/40 flex items-center justify-center text-lg shadow-lg shadow-[#00383C]/50">
               🐄
             </div>
             <div>
               <div className="text-white font-extrabold text-sm leading-tight">Danish Cattle Feed</div>
-              <div className="text-emerald-400 text-xs font-medium">Daily Register</div>
+              <div className="text-[#16A3A8] text-xs font-semibold">Daily Register</div>
             </div>
           </div>
 
@@ -192,7 +192,7 @@ export default function MainPage() {
           <nav className="space-y-5 overflow-y-auto flex-1 min-h-0 scrollbar-thin">
             {navSections.map((section) => (
               <div key={section.label}>
-                <div className="text-[0.68rem] font-bold tracking-wider uppercase text-slate-500 mb-1.5 ml-2">
+                <div className="text-[0.68rem] font-bold tracking-wider uppercase text-white/50 mb-1.5 ml-2">
                   {section.label}
                 </div>
                 <div className="space-y-0.5">
@@ -208,13 +208,13 @@ export default function MainPage() {
                           setMobileOpen(false);
                         }}
                         className={cn(
-                          "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer",
+                          "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all cursor-pointer font-medium",
                           isActive
-                            ? "bg-emerald-600/20 text-white font-medium shadow-inner"
-                            : "text-slate-400 hover:bg-white/[0.06] hover:text-slate-200"
+                            ? "bg-[#087F83] text-white shadow-sm border border-[#16A3A8]/30"
+                            : "text-white/75 hover:bg-white/10 hover:text-white"
                         )}
                       >
-                        <Icon size={18} className={isActive ? "text-emerald-400" : ""} />
+                        <Icon size={18} className={isActive ? "text-[#16A3A8]" : "text-white/70"} />
                         <span>{item.label}</span>
                       </button>
                     );
@@ -225,21 +225,21 @@ export default function MainPage() {
           </nav>
 
           {/* User Profile & Logout footer */}
-          <div className="mt-4 pt-4 border-t border-white/[0.08] space-y-3 shrink-0">
+          <div className="mt-4 pt-4 border-t border-white/10 space-y-3 shrink-0">
             <div className="flex items-center gap-3 px-2">
-              <div className="w-8 h-8 min-w-[2rem] rounded-lg bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center">
-                <User className="w-4 h-4 text-emerald-400" />
+              <div className="w-8 h-8 min-w-[2rem] rounded-lg bg-[#087F83]/40 border border-[#16A3A8]/30 flex items-center justify-center">
+                <User className="w-4 h-4 text-[#16A3A8]" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-white text-xs font-semibold truncate">{user.name || "Zain Ali"}</div>
-                <div className="text-emerald-400/80 text-[0.68rem] truncate mt-0.5">{user.email}</div>
+                <div className="text-[#16A3A8] text-[0.68rem] truncate mt-0.5">{user.email}</div>
               </div>
             </div>
             <button
               id="sidebar-logout-btn"
               onClick={handleLogout}
               disabled={loggingOut}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-colors cursor-pointer disabled:opacity-50"
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-red-300 hover:bg-red-500/20 hover:text-red-200 transition-colors cursor-pointer disabled:opacity-50"
             >
               {loggingOut ? <Loader2 size={18} className="animate-spin" /> : <LogOut size={18} />}
               <span>{loggingOut ? "Signing out..." : "Sign Out"}</span>

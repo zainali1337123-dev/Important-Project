@@ -1097,7 +1097,7 @@ export default function DailyEntryPage() {
             { id: "section-today-sales", label: "Today's Sales", icon: Receipt },
             { id: "section-add-expense", label: "Add Expense", icon: TrendingDown },
             { id: "section-today-expenses", label: "Today's Expenses", icon: TrendingDown, iconColor: "text-orange-500" },
-            { id: "section-add-customer-payment", label: "Add Payment", icon: Wallet, iconColor: "text-emerald-600" },
+            { id: "section-add-customer-payment", label: "Add Payment", icon: Wallet, iconColor: "text-[#087F83]" },
             { id: "section-customer-payment-history", label: "Payment History", icon: Wallet },
           ]}
         />

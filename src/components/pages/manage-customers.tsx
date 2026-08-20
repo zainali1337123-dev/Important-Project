@@ -434,7 +434,7 @@ export default function ManageCustomersPage() {
         items={[
           { id: "section-summary", label: "Summary & Actions", icon: Users },
           { id: "section-search", label: "Search", icon: Search },
-          { id: "section-active-customers", label: "Active Customers", icon: UserCheck, iconColor: "text-emerald-600" },
+          { id: "section-active-customers", label: "Active Customers", icon: UserCheck, iconColor: "text-[#087F83]" },
           ...((inactiveQ.data?.total ?? 0) > 0 || noInactiveMatch ? [{ id: "section-inactive-customers", label: "Inactive Customers", icon: Ban }] : []),
         ]}
       />

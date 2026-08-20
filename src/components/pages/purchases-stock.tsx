@@ -946,7 +946,7 @@ export default function PurchasesStockPage() {
           items={[
             { id: "section-stock", label: "Current Stock", icon: Package, iconColor: "text-blue-600" },
             { id: "section-purchase", label: "Record a Purchase", icon: ShoppingBag },
-            { id: "section-today-purchases", label: "Purchase History", icon: ShoppingBag, iconColor: "text-emerald-600" },
+            { id: "section-today-purchases", label: "Purchase History", icon: ShoppingBag, iconColor: "text-[#087F83]" },
           ]}
         />
 

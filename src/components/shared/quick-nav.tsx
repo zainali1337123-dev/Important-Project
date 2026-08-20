@@ -59,10 +59,10 @@ export function QuickNav({ items, title }: { items: QuickNavItem[]; title?: stri
   };
 
   return (
-    <div className="sticky top-0 z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pb-3 pt-2 bg-slate-50/95 backdrop-blur-sm border-b border-slate-200/70">
+    <div className="sticky top-0 z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pb-3 pt-2 bg-[#F4F7F7]/95 backdrop-blur-sm border-b border-[#DCE5E5]">
       <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-2">
         {title && (
-          <span className="text-[0.65rem] font-bold uppercase tracking-wider text-slate-400 shrink-0 pr-2 border-r border-slate-200 mr-1 w-full sm:w-auto sm:inline-block mb-1 sm:mb-0">
+          <span className="text-[0.65rem] font-bold uppercase tracking-wider text-[#6B7C7F] shrink-0 pr-2 border-r border-[#DCE5E5] mr-1 w-full sm:w-auto sm:inline-block mb-1 sm:mb-0">
             {title}
           </span>
         )}
@@ -74,13 +74,13 @@ export function QuickNav({ items, title }: { items: QuickNavItem[]; title?: stri
               key={item.id}
               onClick={() => handleClick(item.id)}
               className={cn(
-                "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 border",
+                "shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 border cursor-pointer",
                 isActive
-                  ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                  : "bg-white text-slate-600 border-slate-200 hover:border-emerald-300 hover:text-emerald-700 hover:bg-emerald-50",
+                  ? "bg-[#087F83] text-white border-[#087F83] shadow-sm"
+                  : "bg-white text-[#173337] border-[#DCE5E5] hover:border-[#16A3A8] hover:text-[#087F83] hover:bg-[#E8F4F4]",
               )}
             >
-              {Icon && <Icon className={cn("size-3.5", isActive ? "text-white" : item.iconColor || "text-slate-500")} />}
+              {Icon && <Icon className={cn("size-3.5", isActive ? "text-white" : item.iconColor || "text-[#087F83]")} />}
               {item.label}
             </button>
           );

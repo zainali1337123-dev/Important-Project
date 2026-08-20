@@ -9,23 +9,28 @@ import {
 } from "@/lib/pdf-urdu";
 
 /* ─── Farm branding constants (matches generate-customer-bill.ts) ─── */
-const FARM_NAME = "DANISH FARMHOUSE";
+const FARM_NAME = "DANISH CATTLE FEED";
 const FARM_TAGLINE = "Cattle Feed Supplier";
-const FARM_ADDRESS = "Main Road, Tehsil & District Kasur, Punjab";
-const FARM_PHONE = "0300-0000000";
-const DEV_LINE1 = "Software By: Shahid ALI";
-const DEV_LINE2 = "Contact: 03271487858";
+const FARM_ADDRESS = "Farm: Dry port phatak Faisalabad";
+const SHOP_ADDRESS = "Shop: Madni kholoni shamsabad jhumra road";
+const FARM_PHONE = "0300-3966715";
+
+function toTitleCase(str?: string | null): string {
+  if (!str) return "";
+  return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
+}
 
 /* Color palette */
 const C_GREEN: [number, number, number] = [8, 80, 57];
 const C_GREEN_LIGHT: [number, number, number] = [240, 244, 240];
 const C_GOLD: [number, number, number] = [245, 196, 56];
 const C_GOLD_LIGHT: [number, number, number] = [252, 247, 232];
-const C_DARK: [number, number, number] = [30, 40, 50];
-const C_GRAY: [number, number, number] = [110, 120, 130];
-const C_GRAY_LIGHT: [number, number, number] = [218, 222, 220];
+const C_DARK: [number, number, number] = [23, 51, 55];
+const C_MUTED_GRAY: [number, number, number] = [85, 85, 85];
+const C_GRAY: [number, number, number] = [107, 124, 127];
+const C_GRAY_LIGHT: [number, number, number] = [220, 229, 229];
 const C_WHITE: [number, number, number] = [255, 255, 255];
-const C_AMBER: [number, number, number] = [180, 120, 30];
+const C_AMBER: [number, number, number] = [194, 138, 36];
 
 /**
  * Generate a PDF bill for a single Buy-Product transaction
@@ -75,41 +80,42 @@ export async function generateBuyProductBillPDF(params: {
   doc.rect(0, 0, pw, 2.5, "F");
 
   /* ═══════ HEADER ═══════ */
-  const headerH = 36;
+  const headerH = 42;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(22);
   doc.setTextColor(...C_GREEN);
-  doc.text(FARM_NAME, m, 14);
+  doc.text(FARM_NAME, m, 13);
 
   doc.setFont("helvetica", "italic");
   doc.setFontSize(9.5);
   doc.setTextColor(...C_GRAY);
-  doc.text(FARM_TAGLINE, m, 20);
+  doc.text(FARM_TAGLINE, m, 19);
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
-  doc.setTextColor(120, 130, 140);
-  doc.text(FARM_ADDRESS, m, 26);
-  doc.text(`Phone: ${FARM_PHONE}`, m, 30);
+  doc.setFontSize(7.8);
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text(FARM_ADDRESS, m, 25);
+  doc.text(SHOP_ADDRESS, m, 29);
+  doc.text(`Phone: ${FARM_PHONE}`, m, 33);
 
   // Right: BILL label
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
   doc.setTextColor(...C_AMBER);
-  doc.text("PURCHASE", pw - m, 14, { align: "right" });
+  doc.text("PURCHASE", pw - m, 13, { align: "right" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(...C_GRAY);
-  doc.text("Goods Bought From Customer", pw - m, 20, { align: "right" });
+  doc.text("Goods Bought From Customer", pw - m, 19, { align: "right" });
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(...C_DARK);
-  doc.text(`Bill #${purchase.id}`, pw - m, 27, { align: "right" });
+  doc.text(`Bill #${purchase.id}`, pw - m, 25, { align: "right" });
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(...C_GRAY);
-  doc.text(`Generated: ${generatedAt}`, pw - m, 31, { align: "right" });
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text(`Generated: ${generatedAt}`, pw - m, 29, { align: "right" });
 
   // Gold + green divider
   doc.setDrawColor(...C_GOLD);
@@ -119,70 +125,67 @@ export async function generateBuyProductBillPDF(params: {
   doc.setDrawColor(...C_GREEN);
   doc.line(m, headerH + 1.2, pw - m, headerH + 1.2);
 
-  y = headerH + 8;
+  y = headerH + 7;
 
-  /* ═══════ TWO-COLUMN: Customer Info | Bill Summary ═══════ */
-  const colW = (pw - m * 2 - 6) / 2;
-  const colH = 26;
+  /* ═══════ TWO-COLUMN: Customer Info | Bill Summary (Unboxed) ═══════ */
+  const colW = (pw - m * 2 - 12) / 2;
   const leftX = m;
-  const rightX = m + colW + 6;
+  const rightX = m + colW + 12;
 
-  // Left box — Bought From (Customer Info)
-  doc.setFillColor(...C_GREEN_LIGHT);
-  doc.setDrawColor(...C_GRAY_LIGHT);
+  // Left — Bought From (Customer Info)
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  doc.setTextColor(...C_AMBER);
+  doc.text("BOUGHT FROM:", leftX, y + 4);
+
+  doc.setDrawColor(...C_AMBER);
   doc.setLineWidth(0.3);
-  doc.roundedRect(leftX, y, colW, colH, 1.5, 1.5, "FD");
-  doc.setFillColor(...C_AMBER);
-  doc.rect(leftX, y, 1.5, colH, "F");
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.setTextColor(...C_AMBER);
-  doc.text("BOUGHT FROM", leftX + 5, y + 6);
+  doc.line(leftX, y + 6, leftX + 32, y + 6);
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.setTextColor(...C_GRAY);
-  doc.text("Name", leftX + 5, y + 11);
-  doc.text("Phone", leftX + 5, y + 17);
-  doc.text("Type", leftX + 5, y + 23);
+  doc.setFontSize(8);
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text("Name:", leftX, y + 12);
+  doc.text("Phone:", leftX, y + 18);
+  doc.text("Type:", leftX, y + 24);
 
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...C_DARK);
+  doc.text(toTitleCase(customer?.name ?? "N/A").slice(0, 26), leftX + 22, y + 12);
+  doc.setFontSize(8.5);
+  doc.setFont("helvetica", "normal");
+  doc.text(customer?.phone || "—", leftX + 22, y + 18);
+  doc.text(customer?.type === "credit" ? "Credit Customer" : "Cash Customer", leftX + 22, y + 24);
+
+  // Right — Bill Summary
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
-  doc.setTextColor(...C_DARK);
-  doc.text((customer?.name ?? "N/A").slice(0, 24), leftX + 28, y + 11);
-  doc.setFontSize(8.5);
-  doc.text(customer?.phone || "—", leftX + 28, y + 17);
-  doc.text(customer?.type === "credit" ? "Credit Customer" : "Cash Customer", leftX + 28, y + 23);
-
-  // Right box — Bill Summary
-  doc.setFillColor(...C_GREEN_LIGHT);
-  doc.setDrawColor(...C_GRAY_LIGHT);
-  doc.roundedRect(rightX, y, colW, colH, 1.5, 1.5, "FD");
-  doc.setFillColor(...C_AMBER);
-  doc.rect(rightX, y, 1.5, colH, "F");
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
   doc.setTextColor(...C_AMBER);
-  doc.text("SUMMARY", rightX + 5, y + 6);
+  doc.text("SUMMARY:", rightX, y + 4);
+
+  doc.setDrawColor(...C_AMBER);
+  doc.setLineWidth(0.3);
+  doc.line(rightX, y + 6, rightX + 26, y + 6);
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.setTextColor(...C_GRAY);
-  doc.text("Date", rightX + 5, y + 11);
-  doc.text("Location", rightX + 5, y + 17);
-  doc.text("Bill #", rightX + 5, y + 23);
+  doc.setFontSize(8);
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text("Date:", rightX, y + 12);
+  doc.text("Location:", rightX, y + 18);
+  doc.text("Bill #:", rightX, y + 24);
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9.5);
+  doc.setFontSize(9);
   doc.setTextColor(...C_DARK);
-  doc.text(purchase.purchase_date || "—", rightX + 32, y + 11);
+  doc.text(purchase.purchase_date || "—", rightX + 24, y + 12);
   doc.setFontSize(8.5);
-  doc.text(locationName || "Farmhouse", rightX + 32, y + 17);
-  doc.text(`#${purchase.id}`, rightX + 32, y + 23);
+  doc.setFont("helvetica", "normal");
+  doc.text(locationName || "Farmhouse", rightX + 24, y + 18);
+  doc.setFont("helvetica", "bold");
+  doc.text(`#${purchase.id}`, rightX + 24, y + 24);
 
-  y += colH + 8;
+  y += 30;
 
   /* ═══════ ITEM TABLE ═══════ */
   const qty = Number(purchase.quantity ?? 0);
@@ -299,28 +302,27 @@ export async function generateBuyProductBillPDF(params: {
   // autoTable advances y automatically — read it back
   y = (doc as any).lastAutoTable.finalY + 10;
 
-  /* ═══════ TOTAL IN WORDS ═══════ */
-  doc.setFillColor(...C_GOLD_LIGHT);
-  doc.setDrawColor(...C_GOLD);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(m, y, pw - m * 2, 14, 1.5, 1.5, "FD");
-
+  /* ═══════ TOTAL IN WORDS & SUMMARY (Unboxed) ═══════ */
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
+  doc.setFontSize(9);
   doc.setTextColor(...C_AMBER);
-  doc.text("TOTAL AMOUNT PAYABLE TO CUSTOMER", m + 4, y + 5);
+  doc.text("TOTAL AMOUNT PAYABLE TO CUSTOMER:", m, y + 5);
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
-  doc.setTextColor(...C_DARK);
-  doc.text(`Rs. ${totalAmount.toLocaleString("en-PK")}`, pw - m - 4, y + 5, { align: "right" });
+  doc.setFontSize(14);
+  doc.setTextColor(...C_GREEN);
+  doc.text(`Rs. ${totalAmount.toLocaleString("en-PK")}`, pw - m, y + 5, { align: "right" });
+
+  doc.setDrawColor(...C_GREEN);
+  doc.setLineWidth(0.5);
+  doc.line(m, y + 8, pw - m, y + 8);
 
   doc.setFont("helvetica", "italic");
-  doc.setFontSize(8);
-  doc.setTextColor(...C_GRAY);
-  doc.text(`In words: ${numberToRupeeWords(totalAmount)}`, m + 4, y + 11);
+  doc.setFontSize(8.5);
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text(`In words: ${numberToRupeeWords(totalAmount)}`, m, y + 14);
 
-  y += 18;
+  y += 20;
 
   /* ═══════ NOTES (optional) ═══════ */
   if (purchase.notes) {
@@ -347,21 +349,21 @@ export async function generateBuyProductBillPDF(params: {
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
-  doc.setTextColor(...C_GRAY);
+  doc.setTextColor(...C_MUTED_GRAY);
   doc.text("Customer Signature", m, y + 5);
   doc.text("Authorized Signature", pw - m - 60, y + 5);
 
-  /* ═══════ DEV CREDIT FOOTER ═══════ */
+  /* ═══════ CLEAN FOOTER ═══════ */
+  const footY = ph - 10;
   doc.setDrawColor(...C_GOLD);
-  doc.setLineWidth(0.5);
-  doc.line(m, ph - 16, pw - m, ph - 16);
+  doc.setLineWidth(0.8);
+  doc.line(m, footY, pw - m, footY);
+  doc.setDrawColor(...C_GREEN);
+  doc.setLineWidth(0.2);
+  doc.line(m, footY + 1, pw - m, footY + 1);
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.setTextColor(...C_GRAY);
-  doc.text(DEV_LINE1, m, ph - 11);
-  doc.text(DEV_LINE2, m, ph - 7.5);
-  doc.text("This is a computer-generated bill.", pw - m, ph - 7.5, { align: "right" });
+  doc.setFillColor(...C_GOLD);
+  doc.rect(0, ph - 2, pw, 2, "F");
 
   // Save
   const fileName = `buy-bill-${purchase.id}-${(customer?.name ?? "customer").replace(/\s+/g, "_")}.pdf`;

@@ -359,7 +359,7 @@ export default function ManageProducts() {
       <QuickNav
         title="Jump to"
         items={[
-          { id: "section-active", label: "Active Products", icon: BoxesIcon, iconColor: "text-emerald-600" },
+          { id: "section-active", label: "Active Products", icon: BoxesIcon, iconColor: "text-[#087F83]" },
           ...(inactiveProducts.length > 0 ? [{ id: "section-inactive", label: "Inactive Products", icon: Ban }] : []),
           { id: "section-add-new", label: "Add New Product", icon: PackagePlus },
         ]}

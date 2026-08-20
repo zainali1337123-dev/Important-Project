@@ -211,8 +211,6 @@ function printMixBill(order: { id: string | number; customer: string; date: stri
       <div class="sig-line">For Danish Cattle Feed<br/>Authorised Signatory</div>
     </div>
     <div class="footer">
-      <div class="dev">Software By: Shahid ALI</div>
-      <div class="contact">Contact: 03271487858</div>
       <div class="meta">Computer-generated invoice &nbsp;•&nbsp; ${new Date().toLocaleString("en-PK")}</div>
     </div>
     <div class="bottom-line"></div>
@@ -756,7 +754,7 @@ export default function CustomMixOrder() {
           <QuickNav
             title="Jump to"
             items={[
-              { id: "section-new-order", label: "New Mix Order", icon: FlaskConical, iconColor: "text-emerald-600" },
+              { id: "section-new-order", label: "New Mix Order", icon: FlaskConical, iconColor: "text-[#087F83]" },
               ...(store.targetWeight ? [
                 { id: "section-metrics", label: "Mix Metrics", icon: Scale },
                 { id: "section-ingredient", label: "Add Ingredient", icon: Plus },

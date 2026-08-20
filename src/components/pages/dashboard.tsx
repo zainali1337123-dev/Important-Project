@@ -126,10 +126,10 @@ const columnsMap: Record<CardKey, Col[]> = {
 
 /* ─── Color mapping ─── */
 const cardColors: Record<string, { border: string; text: string; bg: string; badge: string }> = {
-  blue: { border: "border-t-blue-500", text: "text-blue-600", bg: "bg-blue-50", badge: "bg-blue-100 text-blue-700" },
-  purple: { border: "border-t-purple-500", text: "text-purple-600", bg: "bg-purple-50", badge: "bg-purple-100 text-purple-700" },
-  green: { border: "border-t-green-500", text: "text-green-600", bg: "bg-green-50", badge: "bg-green-100 text-green-700" },
-  orange: { border: "border-t-orange-500", text: "text-orange-600", bg: "bg-orange-50", badge: "bg-orange-100 text-orange-700" },
+  blue: { border: "border-t-[#087F83]", text: "text-[#087F83]", bg: "bg-[#E8F4F4]", badge: "bg-[#E8F4F4] text-[#087F83]" },
+  purple: { border: "border-t-[#16A3A8]", text: "text-[#16A3A8]", bg: "bg-[#E8F4F4]", badge: "bg-[#E8F4F4] text-[#087F83]" },
+  green: { border: "border-t-[#004B50]", text: "text-[#004B50]", bg: "bg-[#E8F4F4]", badge: "bg-[#E8F4F4] text-[#004B50]" },
+  orange: { border: "border-t-[#C28A24]", text: "text-[#C28A24]", bg: "bg-[#C28A24]/10", badge: "bg-[#C28A24]/15 text-[#C28A24]" },
 };
 
 /* ─── Card label lookup (outside component to avoid reference issues) ─── */
@@ -384,13 +384,13 @@ export default function Dashboard() {
   const cols = activeCard ? columnsMap[activeCard] : [];
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="min-h-screen bg-[#F4F7F7] text-[#173337]">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between mb-6 gap-2">
           <div>
-            <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 leading-tight">Dashboard</h1>
-            <p className="text-sm text-slate-500 mt-1">
+            <h1 className="text-2xl md:text-3xl font-extrabold text-[#173337] leading-tight">Dashboard</h1>
+            <p className="text-sm text-[#6B7C7F] mt-1">
               Daily Register — {pktFormatted(new Date(), { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
             </p>
           </div>
@@ -401,7 +401,7 @@ export default function Dashboard() {
           items={[
             { id: "section-primary-metrics", label: "Today's Summary", icon: BarChart3 },
             { id: "section-secondary-metrics", label: "Customers & Khata", icon: Users },
-            { id: "section-detail-panel", label: "Records Detail", icon: Receipt, iconColor: "text-emerald-600" },
+            { id: "section-detail-panel", label: "Records Detail", icon: Receipt, iconColor: "text-[#087F83]" },
             { id: "section-quick-actions", label: "Quick Actions", icon: FileText },
           ]}
         />
@@ -639,25 +639,25 @@ function DashboardCard({
     <button
       onClick={onClick}
       className={cn(
-        "bg-white rounded-2xl p-5 border border-slate-100 border-t-[3px] shadow-sm text-left w-full transition-all duration-200 cursor-pointer group",
+        "bg-white rounded-2xl p-5 border border-[#DCE5E5] border-t-[3px] shadow-sm text-left w-full transition-all duration-200 cursor-pointer group",
         colors.border,
         isActive
-          ? "ring-2 ring-emerald-400 ring-offset-1 shadow-md scale-[1.02]"
+          ? "ring-2 ring-[#16A3A8] ring-offset-1 shadow-md scale-[1.02]"
           : "hover:shadow-md hover:scale-[1.01]"
       )}
     >
       <div className="flex items-center justify-between">
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-bold uppercase tracking-wider text-slate-500 group-hover:text-slate-600 transition-colors truncate">
+          <div className="text-xs font-bold uppercase tracking-wider text-[#6B7C7F] group-hover:text-[#173337] transition-colors truncate">
             {card.label}
           </div>
-          <div className={cn("text-2xl font-extrabold text-slate-900 mt-1 truncate", colors.text)}>
+          <div className={cn("text-2xl font-extrabold text-[#173337] mt-1 truncate", colors.text)}>
             {card.value}
           </div>
         </div>
         <div className={cn(
           "flex-shrink-0 ml-2 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200",
-          isActive ? "bg-emerald-100 text-emerald-600 rotate-180" : "bg-slate-100 text-slate-400 group-hover:bg-slate-200 group-hover:text-slate-500"
+          isActive ? "bg-[#E8F4F4] text-[#087F83] rotate-180" : "bg-[#F4F7F7] text-[#6B7C7F] group-hover:bg-[#E8F4F4] group-hover:text-[#087F83]"
         )}>
           <ChevronDown className="w-4 h-4" />
         </div>

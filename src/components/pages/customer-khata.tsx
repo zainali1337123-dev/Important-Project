@@ -561,7 +561,7 @@ export default function CustomerKhataPage() {
         title="Jump to"
         items={[
           { id: "section-overview", label: "All Customers", icon: Users },
-          { id: "section-history", label: "Customer History", icon: BookOpen, iconColor: "text-emerald-600" },
+          { id: "section-history", label: "Customer History", icon: BookOpen, iconColor: "text-[#087F83]" },
         ]}
       />
 

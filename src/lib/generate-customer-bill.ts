@@ -50,17 +50,21 @@ const FARM_TAGLINE = "Cattle Feed Supplier";
 const FARM_ADDRESS = "Farm: Dry port phatak Faisalabad";
 const SHOP_ADDRESS = "Shop: Madni kholoni shamsabad jhumra road";
 const FARM_PHONE = "0300-3966715";
-const DEV_LINE1 = "Software By: Shahid ALI";
-const DEV_LINE2 = "Contact: 03271487858";
+
+function toTitleCase(str?: string | null): string {
+  if (!str) return "";
+  return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
+}
 
 /* Color palette */
 const C_GREEN: [number, number, number] = [8, 80, 57];
 const C_GREEN_LIGHT: [number, number, number] = [240, 244, 240];
 const C_GOLD: [number, number, number] = [245, 196, 56];
 const C_GOLD_LIGHT: [number, number, number] = [252, 247, 232];
-const C_DARK: [number, number, number] = [30, 40, 50];
-const C_GRAY: [number, number, number] = [110, 120, 130];
-const C_GRAY_LIGHT: [number, number, number] = [218, 222, 220];
+const C_DARK: [number, number, number] = [23, 51, 55];
+const C_MUTED_GRAY: [number, number, number] = [85, 85, 85];
+const C_GRAY: [number, number, number] = [107, 124, 127];
+const C_GRAY_LIGHT: [number, number, number] = [220, 229, 229];
 const C_WHITE: [number, number, number] = [255, 255, 255];
 
 export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<CustomerBillResult> {
@@ -158,8 +162,6 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   /* ════════════════════════════════════════════════════════
    *  HEADER — Clean letterhead style
    * ════════════════════════════════════════════════════════ */
-  // Header height increased from 36 → 42 to fit both Farm + Shop addresses
-  // (previously only one address line + phone).
   const headerH = 42;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(22);
@@ -172,8 +174,8 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   doc.text(FARM_TAGLINE, m, 19);
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
-  doc.setTextColor(120, 130, 140);
+  doc.setFontSize(7.8);
+  doc.setTextColor(...C_MUTED_GRAY);
   doc.text(FARM_ADDRESS, m, 25);
   doc.text(SHOP_ADDRESS, m, 29);
   doc.text(`Phone: ${FARM_PHONE}`, m, 33);
@@ -194,7 +196,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   doc.setTextColor(...C_DARK);
   doc.text(`Customer #${bill.customer.id}`, pw - m, 25, { align: "right" });
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(...C_GRAY);
+  doc.setTextColor(...C_MUTED_GRAY);
   doc.text(`Generated: ${bill.generatedAt}`, pw - m, 29, { align: "right" });
 
   // Gold + green divider
@@ -205,85 +207,82 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   doc.setDrawColor(...C_GREEN);
   doc.line(m, headerH + 1.2, pw - m, headerH + 1.2);
 
-  y = headerH + 8;
+  y = headerH + 7;
 
   /* ════════════════════════════════════════════════════════
    *  TWO-COLUMN: Customer Info (left) | Summary (right)
+   *  Unboxed, clean structured blocks
    * ════════════════════════════════════════════════════════ */
-  const colW = (pw - m * 2 - 6) / 2;
-  const colH = 26;
+  const colW = (pw - m * 2 - 12) / 2;
   const leftX = m;
-  const rightX = m + colW + 6;
+  const rightX = m + colW + 12;
 
-  // Left box — Customer Info
-  doc.setFillColor(...C_GREEN_LIGHT);
-  doc.setDrawColor(...C_GRAY_LIGHT);
+  // Left — Customer Info
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  doc.setTextColor(...C_GREEN);
+  doc.text("CUSTOMER INFO:", leftX, y + 4);
+
+  doc.setDrawColor(...C_GREEN);
   doc.setLineWidth(0.3);
-  doc.roundedRect(leftX, y, colW, colH, 1.5, 1.5, "FD");
-  doc.setFillColor(...C_GREEN);
-  doc.rect(leftX, y, 1.5, colH, "F");
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.setTextColor(...C_GREEN);
-  doc.text("CUSTOMER INFO", leftX + 5, y + 6);
+  doc.line(leftX, y + 6, leftX + 34, y + 6);
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.setTextColor(...C_GRAY);
-  doc.text("Name", leftX + 5, y + 11);
-  doc.text("Phone", leftX + 5, y + 17);
-  doc.text("Type", leftX + 5, y + 23);
+  doc.setFontSize(8);
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text("Name:", leftX, y + 12);
+  doc.text("Phone:", leftX, y + 18);
+  doc.text("Type:", leftX, y + 24);
 
+  const formattedCustName = toTitleCase(bill.customer.name) || "N/A";
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...C_DARK);
+  doc.text(formattedCustName.slice(0, 26), leftX + 22, y + 12);
+  doc.setFontSize(8.5);
+  doc.setFont("helvetica", "normal");
+  doc.text(bill.customer.phone || "—", leftX + 22, y + 18);
+  doc.text(bill.customer.type === "credit" ? "Credit (Udhaar)" : "Cash (Nagad)", leftX + 22, y + 24);
+
+  // Right — Statement Summary
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
-  doc.setTextColor(...C_DARK);
-  doc.text(bill.customer.name?.slice(0, 24) || "N/A", leftX + 28, y + 11);
-  doc.setFontSize(8.5);
-  doc.text(bill.customer.phone || "—", leftX + 28, y + 17);
-  doc.text(bill.customer.type === "credit" ? "Credit (Udhaar)" : "Cash (Nagad)", leftX + 28, y + 23);
-
-  // Right box — Statement Summary
-  doc.setFillColor(...C_GREEN_LIGHT);
-  doc.setDrawColor(...C_GRAY_LIGHT);
-  doc.roundedRect(rightX, y, colW, colH, 1.5, 1.5, "FD");
-  doc.setFillColor(...C_GREEN);
-  doc.rect(rightX, y, 1.5, colH, "F");
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
   doc.setTextColor(...C_GREEN);
-  doc.text("SUMMARY", rightX + 5, y + 6);
+  doc.text("SUMMARY:", rightX, y + 4);
+
+  doc.setDrawColor(...C_GREEN);
+  doc.setLineWidth(0.3);
+  doc.line(rightX, y + 6, rightX + 26, y + 6);
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.setTextColor(...C_GRAY);
-  doc.text("Opening Bal.", rightX + 5, y + 11);
-  doc.text("Total Sales", rightX + 5, y + 17);
-  doc.text("Cash Paid", rightX + 5, y + 23);
+  doc.setFontSize(8);
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text("Opening Bal:", rightX, y + 12);
+  doc.text("Total Sales:", rightX, y + 18);
+  doc.text("Cash Paid:", rightX, y + 24);
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9.5);
+  doc.setFontSize(9);
   doc.setTextColor(...C_DARK);
+  doc.text(`Rs. ${bill.openingBalance.toLocaleString("en-PK")}`, rightX + 28, y + 12);
   doc.setFontSize(8.5);
-  // Use ACTUAL totals computed from displayed rows (include mix-order driver rents).
-  doc.text(`Rs. ${bill.openingBalance.toLocaleString("en-PK")}`, rightX + 32, y + 11);
-  doc.text(`Rs. ${effectiveTotalBill.toLocaleString("en-PK")}`, rightX + 32, y + 17);
-  doc.text(`Rs. ${effectiveTotalCash.toLocaleString("en-PK")}`, rightX + 32, y + 23);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Rs. ${effectiveTotalBill.toLocaleString("en-PK")}`, rightX + 28, y + 18);
+  doc.text(`Rs. ${effectiveTotalCash.toLocaleString("en-PK")}`, rightX + 28, y + 24);
 
   // Advance Payment row — shown only when customer has advance balance > 0
   if (advancePayment > 0) {
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.setTextColor(...C_GRAY);
-    doc.text("Advance Paid", rightX + 5, y + 29);
+    doc.setFontSize(8);
+    doc.setTextColor(...C_MUTED_GRAY);
+    doc.text("Advance Paid:", rightX, y + 30);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
     doc.setTextColor(...C_GREEN);
-    doc.text(`Rs. ${advancePayment.toLocaleString("en-PK")}`, rightX + 32, y + 29);
+    doc.text(`Rs. ${(Number(advancePayment) || 0).toLocaleString("en-PK")}`, rightX + 28, y + 30);
   }
 
-  y += colH + 8;
+  y += advancePayment > 0 ? 36 : 30;
 
   /* ════════════════════════════════════════════════════════
    *  TRANSACTION TABLE
@@ -535,44 +534,34 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   });
 
   /* ════════════════════════════════════════════════════════
-   *  TOTALS BOX (right) + Amount in words (left)
+   *  TOTALS SECTION (Unboxed summary list) + Amount in words
    * ════════════════════════════════════════════════════════ */
   const fy = (doc as any).lastAutoTable.finalY + 8;
-  const tBoxW = 80;
+  const tBoxW = 85;
   const tBoxX = pw - m - tBoxW;
-  // 4 rows when opening balance > 0, else 3 rows. Add 1 more row when advance > 0.
-  // Add 1 more row when As Rate/Bag is shown (below Total Bill).
+  let ty = fy + 5;
+  const labelX = tBoxX;
+  const valX = pw - m;
+
   const hasOpening = bill.openingBalance > 0;
   const hasAdvance = advancePayment > 0;
-  const rowCount = (hasOpening ? 4 : 3) + (hasAdvance ? 1 : 0) + (hasAsRatePerBag ? 1 : 0);
-  const tBoxH = 8 + rowCount * 7 + 10;
-
-  doc.setFillColor(...C_WHITE);
-  doc.setDrawColor(...C_GREEN);
-  doc.setLineWidth(0.5);
-  doc.roundedRect(tBoxX, fy, tBoxW, tBoxH, 1.5, 1.5, "FD");
-  doc.setLineWidth(0.2);
-
-  let ty = fy + 7;
-  const labelX = tBoxX + 6;
-  const valX = tBoxX + tBoxW - 6;
 
   // Opening Balance (only when > 0)
   if (hasOpening) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.setTextColor(...C_GRAY);
+    doc.setTextColor(...C_MUTED_GRAY);
     doc.text("Opening Bal:", labelX, ty);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(...C_DARK);
     doc.text(`Rs. ${bill.openingBalance.toLocaleString("en-PK")}`, valX, ty, { align: "right" });
-    ty += 7;
+    ty += 6.5;
   }
 
   // Total Bill
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.setTextColor(...C_GRAY);
+  doc.setTextColor(...C_MUTED_GRAY);
   doc.text("Total Bill:", labelX, ty);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...C_DARK);
@@ -580,10 +569,10 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
 
   // As Rate/Bag (= Subtotal excluding rents / Total Bags) — below Total Bill
   if (hasAsRatePerBag) {
-    ty += 7;
+    ty += 6.5;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8.5);
-    doc.setTextColor(...C_GRAY);
+    doc.setTextColor(...C_MUTED_GRAY);
     doc.text(`As Rate/Bag (${(Number(actualTotalBags) || 0).toLocaleString("en-PK", { maximumFractionDigits: 2 })} bags):`, labelX, ty);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(...C_DARK);
@@ -591,10 +580,10 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   }
 
   // Cash Paid
-  ty += 7;
+  ty += 6.5;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.setTextColor(...C_GRAY);
+  doc.setTextColor(...C_MUTED_GRAY);
   doc.text("Cash Paid:", labelX, ty);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...C_DARK);
@@ -602,122 +591,118 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
 
   // Advance Payment (only when > 0)
   if (hasAdvance) {
-    ty += 7;
+    ty += 6.5;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.setTextColor(...C_GRAY);
+    doc.setTextColor(...C_MUTED_GRAY);
     doc.text("Advance Paid:", labelX, ty);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(...C_GREEN);
     doc.text(`Rs. ${(Number(advancePayment) || 0).toLocaleString("en-PK")}`, valX, ty, { align: "right" });
   }
 
-  // Divider
-  ty += 5;
-  doc.setDrawColor(...C_GOLD);
-  doc.setLineWidth(0.5);
-  doc.line(tBoxX + 4, ty, tBoxX + tBoxW - 4, ty);
-  doc.setLineWidth(0.2);
+  // Divider line before Balance Due
+  ty += 4.5;
+  doc.setDrawColor(...C_GRAY_LIGHT);
+  doc.setLineWidth(0.3);
+  doc.line(labelX, ty, valX, ty);
 
   // Balance Due
-  ty += 7;
+  ty += 6.5;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
   doc.setTextColor(...C_GREEN);
   doc.text("BALANCE DUE", labelX, ty);
   doc.text(balanceStr, valX, ty, { align: "right" });
 
-  // Amount in words — left side
+  // Double bottom border under Balance Due
+  ty += 2.5;
+  doc.setDrawColor(...C_GREEN);
+  doc.setLineWidth(0.6);
+  doc.line(labelX, ty, valX, ty);
+  doc.setLineWidth(0.2);
+  doc.line(labelX, ty + 0.8, valX, ty + 0.8);
+
+  // Amount in words — left side, strictly left-aligned at margin m
   doc.setFont("helvetica", "italic");
   doc.setFontSize(8.5);
-  doc.setTextColor(...C_GRAY);
-  doc.text("Balance in words:", m, fy + 6);
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text("Balance in words:", m, fy + 5);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(...C_DARK);
   const wordsText = numberToRupeeWords(bill.balanceDue);
   const wordsLines = doc.splitTextToSize(wordsText, tBoxX - m - 6);
-  doc.text(wordsLines, m, fy + 12);
+  doc.text(wordsLines, m, fy + 11);
 
   /* ════════════════════════════════════════════════════════
-   *  TERMS & CONDITIONS
+   *  TERMS & CONDITIONS — Clean left-aligned layout
    * ════════════════════════════════════════════════════════ */
-  const tcY = fy + tBoxH + 8;
-  doc.setDrawColor(...C_GRAY_LIGHT);
-  doc.setLineWidth(0.3);
-  doc.line(m, tcY, pw - m, tcY);
-  doc.setLineWidth(0.2);
+  const tcY = Math.max(ty + 14, fy + 32);
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(7.5);
+  doc.setFontSize(8);
   doc.setTextColor(...C_GREEN);
-  doc.text("TERMS & CONDITIONS", m, tcY + 4);
+  doc.text("TERMS & CONDITIONS", m, tcY);
+
+  doc.setDrawColor(...C_GRAY_LIGHT);
+  doc.setLineWidth(0.3);
+  doc.line(m, tcY + 2, pw - m, tcY + 2);
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.setTextColor(...C_GRAY);
-  doc.text("1. This is a computer-generated statement based on recorded transactions.", m, tcY + 8);
+  doc.setFontSize(7.5);
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text("1. This is a computer-generated statement based on recorded transactions.", m, tcY + 7);
   doc.text("2. Please verify balances and report discrepancies within 7 days.", m, tcY + 11.5);
-  doc.text("3. All disputes are subject to Faisalabad jurisdiction.", m, tcY + 15);
+  doc.text("3. All disputes are subject to Faisalabad jurisdiction.", m, tcY + 16);
 
   /* ════════════════════════════════════════════════════════
-   *  SIGNATURE SECTION
+   *  SIGNATURE SECTION — Spaced with generous breathing room
    * ════════════════════════════════════════════════════════ */
-  let sigY = tcY + 22;
-  if (sigY > ph - 30) sigY = ph - 30;
+  let sigY = tcY + 30;
+  if (sigY > ph - 36) sigY = ph - 36;
 
   doc.setDrawColor(...C_DARK);
-  doc.setLineWidth(0.3);
+  doc.setLineWidth(0.4);
   doc.line(pw - m - 65, sigY, pw - m, sigY);
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(...C_GRAY);
-  doc.text("For Danish Cattle Feed", pw - m - 32.5, sigY + 4, { align: "center" });
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text("For Danish Cattle Feed", pw - m - 32.5, sigY + 4.5, { align: "center" });
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...C_DARK);
-  doc.text("Authorised Signatory", pw - m - 32.5, sigY + 8, { align: "center" });
+  doc.text("Authorised Signatory", pw - m - 32.5, sigY + 9, { align: "center" });
 
   // Stamp circle on left
   doc.setDrawColor(...C_GREEN);
   doc.setLineWidth(0.5);
-  doc.circle(m + 14, sigY - 3, 11, "S");
+  doc.circle(m + 16, sigY - 4, 12, "S");
   doc.setLineWidth(0.2);
   doc.setDrawColor(...C_GOLD);
-  doc.circle(m + 14, sigY - 3, 9, "S");
-  doc.setFontSize(5.5);
+  doc.circle(m + 16, sigY - 4, 10, "S");
+  doc.setFontSize(6);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...C_GREEN);
-  doc.text("DANISH", m + 14, sigY - 5, { align: "center" });
-  doc.text("CATTLE FEED", m + 14, sigY - 1.5, { align: "center" });
-  doc.setFontSize(4.5);
+  doc.text("DANISH", m + 16, sigY - 6.5, { align: "center" });
+  doc.text("CATTLE FEED", m + 16, sigY - 2.5, { align: "center" });
+  doc.setFontSize(5);
   doc.setTextColor(...C_GOLD);
-  doc.text("★ FSD ★", m + 14, sigY + 2, { align: "center" });
+  doc.text("★ FSD ★", m + 16, sigY + 1.5, { align: "center" });
 
   /* ════════════════════════════════════════════════════════
-   *  FOOTER BAND
+   *  CLEAN FOOTER — Bottom Yellow/Gold Border Line Only
+   *  (No software provider or contact text, completely blank white)
    * ════════════════════════════════════════════════════════ */
-  const footBandH = 13;
-  const footY = ph - footBandH - 3;
-
+  const footY = ph - 10;
   doc.setDrawColor(...C_GOLD);
-  doc.setLineWidth(0.6);
-  doc.line(m, footY - 2, pw - m, footY - 2);
+  doc.setLineWidth(0.8);
+  doc.line(m, footY, pw - m, footY);
   doc.setDrawColor(...C_GREEN);
   doc.setLineWidth(0.2);
-  doc.line(m, footY - 0.8, pw - m, footY - 0.8);
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.setTextColor(...C_GREEN);
-  doc.text(DEV_LINE1, pw / 2, footY + 3.5, { align: "center" });
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
-  doc.setTextColor(...C_GRAY);
-  doc.text(DEV_LINE2, pw / 2, footY + 8, { align: "center" });
+  doc.line(m, footY + 1, pw - m, footY + 1);
 
   doc.setFillColor(...C_GOLD);
-  doc.rect(0, ph - 1.5, pw, 1.5, "F");
+  doc.rect(0, ph - 2, pw, 2, "F");
 
   const fileName = `Khata-Bill-${bill.customer.name.replace(/\s+/g, "-")}-${bill.customer.id}.pdf`;
   doc.save(fileName);

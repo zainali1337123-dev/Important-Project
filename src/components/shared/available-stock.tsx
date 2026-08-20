@@ -354,11 +354,11 @@ export function AvailableStock({
 
             {!hideSummary && (
               <div className="mt-3 flex flex-wrap gap-3 pt-2">
-                <div className="flex-1 min-w-[140px] rounded-lg bg-slate-50 border border-slate-200/60 px-3 py-2 text-center">
-                  <div className="text-xs text-slate-500 font-semibold uppercase">
+                <div className="flex-1 min-w-[140px] rounded-lg bg-[#F4F7F7] border border-[#DCE5E5] px-3 py-2 text-center">
+                  <div className="text-xs text-[#6B7C7F] font-semibold uppercase">
                     Products Tracked
                   </div>
-                  <div className="text-lg font-extrabold text-slate-900">
+                  <div className="text-lg font-extrabold text-[#173337]">
                     {fmt(stockSummary.totalProducts)}
                   </div>
                 </div>
@@ -370,19 +370,19 @@ export function AvailableStock({
                     {fmt(stockSummary.outOfStock)}
                   </div>
                 </div>
-                <div className="flex-1 min-w-[140px] rounded-lg bg-amber-50 border border-amber-200/60 px-3 py-2 text-center">
-                  <div className="text-xs text-amber-700 font-semibold uppercase">
+                <div className="flex-1 min-w-[140px] rounded-lg bg-[#C28A24]/10 border border-[#C28A24]/30 px-3 py-2 text-center">
+                  <div className="text-xs text-[#C28A24] font-semibold uppercase">
                     Low (&lt; 10 bags)
                   </div>
-                  <div className="text-lg font-extrabold text-amber-700">
+                  <div className="text-lg font-extrabold text-[#C28A24]">
                     {fmt(stockSummary.lowStock)}
                   </div>
                 </div>
-                <div className="flex-1 min-w-[140px] rounded-lg bg-emerald-50 border border-emerald-200/60 px-3 py-2 text-center">
-                  <div className="text-xs text-emerald-700 font-semibold uppercase">
+                <div className="flex-1 min-w-[140px] rounded-lg bg-[#E8F4F4] border border-[#087F83]/30 px-3 py-2 text-center">
+                  <div className="text-xs text-[#087F83] font-semibold uppercase">
                     Total Bags
                   </div>
-                  <div className="text-lg font-extrabold text-emerald-700">
+                  <div className="text-lg font-extrabold text-[#087F83]">
                     {fmt(stockSummary.totalBags)}
                   </div>
                 </div>
