@@ -86,7 +86,7 @@ async function incrementProductStock(
 
   if (existing) {
     const newStock = (Number(existing.stock_quantity) || 0) + qtyBags;
-    const { error: updateErr } = await supabase
+    let { error: updateErr } = await supabase
       .from("product_stock")
       .update({
         stock_quantity: newStock,
@@ -95,12 +95,24 @@ async function incrementProductStock(
       })
       .eq("id", existing.id);
 
+    // Fallback if 'location' column does not exist in schema cache
+    if (updateErr && (updateErr.message?.includes("location") || updateErr.message?.includes("column"))) {
+      const retry = await supabase
+        .from("product_stock")
+        .update({
+          stock_quantity: newStock,
+          last_bag_weight_kg: bagWeightKg || existing.last_bag_weight_kg || 40,
+        })
+        .eq("id", existing.id);
+      updateErr = retry.error;
+    }
+
     if (updateErr) {
       console.error("Failed to update product_stock:", updateErr);
       throw new Error(`Failed to update stock quantity: ${updateErr.message}`);
     }
   } else {
-    const { error: insertErr } = await supabase
+    let { error: insertErr } = await supabase
       .from("product_stock")
       .insert([
         {
@@ -111,6 +123,21 @@ async function incrementProductStock(
           last_bag_weight_kg: bagWeightKg || 40,
         },
       ]);
+
+    // Fallback if 'location' column does not exist in schema cache
+    if (insertErr && (insertErr.message?.includes("location") || insertErr.message?.includes("column"))) {
+      const retry = await supabase
+        .from("product_stock")
+        .insert([
+          {
+            product_id: productId,
+            location_id: locId,
+            stock_quantity: qtyBags,
+            last_bag_weight_kg: bagWeightKg || 40,
+          },
+        ]);
+      insertErr = retry.error;
+    }
 
     if (insertErr) {
       console.error("Failed to insert product_stock:", insertErr);

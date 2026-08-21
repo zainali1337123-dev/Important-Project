@@ -73,7 +73,7 @@ async function handleStockUpsert(request: NextRequest) {
     let resultStock: any = null;
 
     if (existing) {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("product_stock")
         .update({
           stock_quantity: qty,
@@ -84,12 +84,26 @@ async function handleStockUpsert(request: NextRequest) {
         .select()
         .single();
 
+      if (error && (error.message?.includes("location") || error.message?.includes("column"))) {
+        const retry = await supabase
+          .from("product_stock")
+          .update({
+            stock_quantity: qty,
+            last_bag_weight_kg: bw,
+          })
+          .eq("id", existing.id)
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 400 });
       }
       resultStock = data;
     } else {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("product_stock")
         .insert({
           product_id,
@@ -100,6 +114,21 @@ async function handleStockUpsert(request: NextRequest) {
         })
         .select()
         .single();
+
+      if (error && (error.message?.includes("location") || error.message?.includes("column"))) {
+        const retry = await supabase
+          .from("product_stock")
+          .insert({
+            product_id,
+            location_id: locId,
+            stock_quantity: qty,
+            last_bag_weight_kg: bw,
+          })
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 400 });

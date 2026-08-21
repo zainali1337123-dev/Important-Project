@@ -77,7 +77,7 @@ async function decrementProductStock(
 
     if (existing) {
       const newStock = Math.max(0, (Number(existing.stock_quantity) || 0) - qtyBags);
-      await supabase
+      let { error: updateErr } = await supabase
         .from("product_stock")
         .update({
           stock_quantity: newStock,
@@ -85,8 +85,18 @@ async function decrementProductStock(
           location: locName,
         })
         .eq("id", existing.id);
+
+      if (updateErr && (updateErr.message?.includes("location") || updateErr.message?.includes("column"))) {
+        await supabase
+          .from("product_stock")
+          .update({
+            stock_quantity: newStock,
+            last_bag_weight_kg: bagWeightKg || existing.last_bag_weight_kg || 40,
+          })
+          .eq("id", existing.id);
+      }
     } else {
-      await supabase.from("product_stock").insert([
+      let { error: insertErr } = await supabase.from("product_stock").insert([
         {
           product_id: productId,
           location_id: locationId,
@@ -95,6 +105,17 @@ async function decrementProductStock(
           last_bag_weight_kg: bagWeightKg || 40,
         },
       ]);
+
+      if (insertErr && (insertErr.message?.includes("location") || insertErr.message?.includes("column"))) {
+        await supabase.from("product_stock").insert([
+          {
+            product_id: productId,
+            location_id: locationId,
+            stock_quantity: 0,
+            last_bag_weight_kg: bagWeightKg || 40,
+          },
+        ]);
+      }
     }
   } catch (err) {
     console.error("Failed to decrement product stock:", err);
