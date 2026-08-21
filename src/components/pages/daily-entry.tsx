@@ -60,6 +60,7 @@ import {
   CalendarDays,
   Wallet,
   Pencil,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import ConfirmAction from "@/components/shared/confirm-action";
@@ -124,6 +125,7 @@ export default function DailyEntryPage() {
   const [cpTotal, setCpTotal] = useState(0);
   const [cpTotalPages, setCpTotalPages] = useState(1);
   const [downloadingCpExcel, setDownloadingCpExcel] = useState(false);
+  const [downloadingCpPdf, setDownloadingCpPdf] = useState(false);
 
   // ── Use Advance checkbox state (Complete Sale panel) ──
   // When true AND the selected customer has advance_payment > 0,
@@ -146,6 +148,8 @@ export default function DailyEntryPage() {
   const [salesTotal, setSalesTotal] = useState(0);
   const [salesTotalPages, setSalesTotalPages] = useState(1);
   const [downloadingSalesExcel, setDownloadingSalesExcel] = useState(false);
+  const [downloadingSalesPdf, setDownloadingSalesPdf] = useState(false);
+  const [downloadingDaySummaryPdf, setDownloadingDaySummaryPdf] = useState(false);
   // Location filter for Today's Sales — 0 = All Locations (default), 1 = Farmhouse, 2 = Shop
   const [salesLocationFilter, setSalesLocationFilter] = useState<number>(0);
   // Cached locations list for rendering location badges on each sale row
@@ -411,6 +415,128 @@ export default function DailyEntryPage() {
       toast.error(e?.message || "Failed to download Excel");
     } finally {
       setDownloadingSalesExcel(false);
+    }
+  };
+
+  // ── Download ALL sales for the current date as PDF Report ──
+  const handleDownloadSalesPdf = async () => {
+    setDownloadingSalesPdf(true);
+    try {
+      toast.loading("Generating Sales PDF Report…", { id: "pdf-sales-dl" });
+      const all: Record<string, any>[] = [];
+      let page = 1;
+      let totalPages = 1;
+      const pageSize = 200;
+      while (page <= totalPages) {
+        const qs = new URLSearchParams({
+          sale_date: date,
+          page: String(page),
+          pageSize: String(pageSize),
+        });
+        if (salesLocationFilter > 0) {
+          qs.set("location_id", String(salesLocationFilter));
+        }
+        const res = await fetch(`/api/sales?${qs.toString()}`);
+        if (!res.ok) throw new Error("Failed to fetch sales");
+        const body = await res.json();
+        const rows: any[] = Array.isArray(body?.sales) ? body.sales : [];
+        all.push(...rows);
+        totalPages = typeof body?.totalPages === "number" ? body.totalPages : 1;
+        if (rows.length === 0) break;
+        page += 1;
+      }
+      if (all.length === 0) {
+        toast.error("No sales to download for this date", { id: "pdf-sales-dl" });
+        return;
+      }
+
+      const locObj = locationsList.find((l) => l.id === salesLocationFilter);
+      const locLabel = salesLocationFilter > 0 ? (locObj?.name || (salesLocationFilter === 1 ? "Farmhouse" : "Shop")) : "All Locations";
+
+      const { generateSalesReportPDF } = await import("@/lib/generate-report-pdf");
+      await generateSalesReportPDF({
+        sales: all,
+        date,
+        locationName: locLabel,
+      });
+      toast.success(`Sales PDF downloaded (${all.length} records)`, { id: "pdf-sales-dl" });
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to download Sales PDF", { id: "pdf-sales-dl" });
+    } finally {
+      setDownloadingSalesPdf(false);
+    }
+  };
+
+  // ── Download Complete Day-End Supervisor Summary Report (PDF) ──
+  const handleDownloadDaySummaryPdf = async () => {
+    setDownloadingDaySummaryPdf(true);
+    try {
+      toast.loading("Generating Complete Day-End Supervisor Summary…", { id: "pdf-day-summary-dl" });
+
+      // 1. Fetch all sales for this date
+      const allSales: any[] = [];
+      let sPage = 1;
+      let sTotalPages = 1;
+      while (sPage <= sTotalPages) {
+        const qs = new URLSearchParams({ sale_date: date, page: String(sPage), pageSize: "200" });
+        const res = await fetch(`/api/sales?${qs.toString()}`);
+        if (res.ok) {
+          const body = await res.json();
+          const rows = Array.isArray(body?.sales) ? body.sales : [];
+          allSales.push(...rows);
+          sTotalPages = body?.totalPages || 1;
+          if (rows.length === 0) break;
+        } else {
+          break;
+        }
+        sPage += 1;
+      }
+
+      // 2. Fetch all customer payments for this date
+      const allPayments: any[] = [];
+      let cpP = 1;
+      let cpTotalP = 1;
+      while (cpP <= cpTotalP) {
+        const qs = new URLSearchParams({ payment_date: date, page: String(cpP), pageSize: "200" });
+        const res = await fetch(`/api/customer-payments?${qs.toString()}`);
+        if (res.ok) {
+          const body = await res.json();
+          const rows = Array.isArray(body?.rows) ? body.rows : [];
+          allPayments.push(...rows);
+          cpTotalP = body?.totalPages || 1;
+          if (rows.length === 0) break;
+        } else {
+          break;
+        }
+        cpP += 1;
+      }
+
+      // 3. Fetch purchases
+      let allPurchases: any[] = [];
+      try {
+        const pRes = await fetch("/api/purchases");
+        if (pRes.ok) {
+          const pBody = await pRes.json();
+          allPurchases = Array.isArray(pBody?.purchases) ? pBody.purchases : [];
+        }
+      } catch {
+        // purchases optional fallback
+      }
+
+      const { generateDayEndSupervisorSummaryPDF } = await import("@/lib/generate-report-pdf");
+      await generateDayEndSupervisorSummaryPDF({
+        date,
+        sales: allSales,
+        expenses: expenses,
+        customerPayments: allPayments,
+        purchases: allPurchases,
+      });
+
+      toast.success(`Supervisor Day Summary PDF generated for ${date}!`, { id: "pdf-day-summary-dl" });
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to generate Supervisor summary", { id: "pdf-day-summary-dl" });
+    } finally {
+      setDownloadingDaySummaryPdf(false);
     }
   };
 
@@ -922,6 +1048,48 @@ export default function DailyEntryPage() {
     }
   };
 
+  // Download ALL customer payments for the current date as PDF Report
+  const handleDownloadCpPdf = async () => {
+    setDownloadingCpPdf(true);
+    try {
+      toast.loading("Generating Customer Payments PDF…", { id: "pdf-cp-dl" });
+      const all: Record<string, any>[] = [];
+      let page = 1;
+      let totalPages = 1;
+      const pageSize = 200;
+      while (page <= totalPages) {
+        const qs = new URLSearchParams({
+          payment_date: date,
+          page: String(page),
+          pageSize: String(pageSize),
+        });
+        const res = await fetch(`/api/customer-payments?${qs.toString()}`);
+        if (!res.ok) throw new Error("Failed to fetch customer payments");
+        const body = await res.json();
+        const rows: any[] = Array.isArray(body?.rows) ? body.rows : [];
+        all.push(...rows);
+        totalPages = typeof body?.totalPages === "number" ? body.totalPages : 1;
+        if (rows.length === 0) break;
+        page += 1;
+      }
+      if (all.length === 0) {
+        toast.error("No customer payments to download for this date", { id: "pdf-cp-dl" });
+        return;
+      }
+
+      const { generateCustomerPaymentsReportPDF } = await import("@/lib/generate-report-pdf");
+      await generateCustomerPaymentsReportPDF({
+        payments: all,
+        date,
+      });
+      toast.success(`Customer Payments PDF downloaded (${all.length} records)`, { id: "pdf-cp-dl" });
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to download PDF", { id: "pdf-cp-dl" });
+    } finally {
+      setDownloadingCpPdf(false);
+    }
+  };
+
   const regularSales = sales.filter((s) => !s.mix_order_id);
   const mixSales = sales.filter((s) => !!s.mix_order_id);
 
@@ -947,6 +1115,7 @@ export default function DailyEntryPage() {
   const [expenseSearchDebounced, setExpenseSearchDebounced] = useState("");
   const [expensePage, setExpensePage] = useState(1);
   const [downloadingExpensesExcel, setDownloadingExpensesExcel] = useState(false);
+  const [downloadingExpensesPdf, setDownloadingExpensesPdf] = useState(false);
   const EXPENSE_PAGE_SIZE = 10;
 
   // ── Today's Customer Payments: server-side pagination + customer-name search ──
@@ -1014,6 +1183,28 @@ export default function DailyEntryPage() {
       toast.error(err?.message || "Excel download failed");
     } finally {
       setDownloadingExpensesExcel(false);
+    }
+  };
+
+  // Download ALL expenses for the date as PDF Report
+  const handleDownloadExpensesPdf = async () => {
+    setDownloadingExpensesPdf(true);
+    try {
+      toast.loading("Generating Expenses PDF…", { id: "pdf-expenses-dl" });
+      if (expenses.length === 0) {
+        toast.error("No expenses to download for this date", { id: "pdf-expenses-dl" });
+        return;
+      }
+      const { generateExpensesReportPDF } = await import("@/lib/generate-report-pdf");
+      await generateExpensesReportPDF({
+        expenses,
+        date,
+      });
+      toast.success(`Expenses PDF downloaded (${expenses.length} records)`, { id: "pdf-expenses-dl" });
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to download PDF", { id: "pdf-expenses-dl" });
+    } finally {
+      setDownloadingExpensesPdf(false);
     }
   };
 
@@ -1103,15 +1294,30 @@ export default function DailyEntryPage() {
         />
 
         <Card id="section-filter" className="rounded-2xl border-slate-200/60 shadow-sm scroll-mt-24">
-          <CardContent className="p-4 flex flex-wrap items-end gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs uppercase text-slate-500 font-semibold tracking-wider">Date</Label>
-              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="max-w-[200px]" />
+          <CardContent className="p-4 flex flex-wrap items-end justify-between gap-4">
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs uppercase text-slate-500 font-semibold tracking-wider">Date</Label>
+                <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="max-w-[200px]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs uppercase text-slate-500 font-semibold tracking-wider">Location</Label>
+                <LocationSelect value={locationId} onChange={setLocationId} />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs uppercase text-slate-500 font-semibold tracking-wider">Location</Label>
-              <LocationSelect value={locationId} onChange={setLocationId} />
-            </div>
+            <Button
+              onClick={handleDownloadDaySummaryPdf}
+              variant="outline"
+              disabled={downloadingDaySummaryPdf}
+              className="gap-2 border-emerald-600/30 text-emerald-800 bg-emerald-50/50 hover:bg-emerald-100/60"
+            >
+              {downloadingDaySummaryPdf ? (
+                <Loader2 className="size-4 animate-spin text-emerald-700" />
+              ) : (
+                <FileText className="size-4 text-emerald-700" />
+              )}
+              {downloadingDaySummaryPdf ? "Generating Summary..." : "Supervisor Day Summary (PDF)"}
+            </Button>
           </CardContent>
         </Card>
 
@@ -1544,6 +1750,20 @@ export default function DailyEntryPage() {
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={handleDownloadSalesPdf}
+                  disabled={downloadingSalesPdf || salesTotal === 0}
+                  className="shrink-0 gap-1.5"
+                >
+                  {downloadingSalesPdf ? (
+                    <Loader2 className="size-4 animate-spin text-slate-500" />
+                  ) : (
+                    <FileText className="size-4 text-emerald-700" />
+                  )}
+                  {downloadingSalesPdf ? "Generating PDF..." : "Download PDF"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleDownloadSalesExcel}
                   disabled={downloadingSalesExcel || salesTotal === 0}
                   className="shrink-0"
@@ -1846,6 +2066,20 @@ export default function DailyEntryPage() {
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={handleDownloadExpensesPdf}
+                  disabled={downloadingExpensesPdf || expenses.length === 0}
+                  className="shrink-0 gap-1.5"
+                >
+                  {downloadingExpensesPdf ? (
+                    <Loader2 className="size-4 animate-spin text-slate-500" />
+                  ) : (
+                    <FileText className="size-4 text-emerald-700" />
+                  )}
+                  {downloadingExpensesPdf ? "Generating PDF..." : "Download PDF"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleDownloadExpensesExcel}
                   disabled={downloadingExpensesExcel || expenses.length === 0}
                   className="shrink-0"
@@ -2107,6 +2341,20 @@ export default function DailyEntryPage() {
                     </Button>
                   )}
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownloadCpPdf}
+                  disabled={downloadingCpPdf || cpTotal === 0}
+                  className="shrink-0 gap-1.5"
+                >
+                  {downloadingCpPdf ? (
+                    <Loader2 className="size-4 animate-spin text-slate-500" />
+                  ) : (
+                    <FileText className="size-4 text-emerald-700" />
+                  )}
+                  {downloadingCpPdf ? "Generating PDF..." : "Download PDF"}
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

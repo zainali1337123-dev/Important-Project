@@ -95,6 +95,7 @@ export default function PurchasesStockPage() {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   // Purchase History pagination (10 records per page)
   const [historyPage, setHistoryPage] = useState(1);
@@ -781,6 +782,33 @@ export default function PurchasesStockPage() {
     }
   };
 
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+    try {
+      toast.loading("Generating PDF Report…", { id: "pdf-purchases-dl" });
+      const res = await fetch("/api/purchases");
+      if (!res.ok) throw new Error("Failed to fetch purchases");
+      const { purchases: allPurchases } = await res.json();
+
+      if (!allPurchases || allPurchases.length === 0) {
+        toast.error("No purchases to download", { id: "pdf-purchases-dl" });
+        return;
+      }
+
+      const { generatePurchasesReportPDF } = await import("@/lib/generate-report-pdf");
+      await generatePurchasesReportPDF({
+        purchases: allPurchases,
+        title: "Purchase & Stock Report",
+        subtitle: `Complete intake history as of ${today}`,
+      });
+      toast.success(`PDF report downloaded (${allPurchases.length} records)`, { id: "pdf-purchases-dl" });
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to generate PDF", { id: "pdf-purchases-dl" });
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   const getQuantityLabel = (p: Purchase) => {
     if (p.unit_type === "bags") {
       return `${p.quantity} bag${p.quantity !== 1 ? "s" : ""}`;
@@ -1277,9 +1305,24 @@ export default function PurchasesStockPage() {
                     : `${purchases.length} purchase${purchases.length !== 1 ? "s" : ""} recorded • Showing ${pagedPurchases.length} of ${purchases.length}`}
                 </CardDescription>
               </div>
-              <Button onClick={handleDownloadExcel} variant="outline" className="gap-2 border-slate-300 text-slate-700 hover:bg-slate-100" disabled={purchases.length === 0}>
-                <Download className="size-4" /> Download Excel
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={handleDownloadPdf}
+                  variant="outline"
+                  className="gap-2 border-slate-300 text-slate-700 hover:bg-slate-100"
+                  disabled={purchases.length === 0 || downloadingPdf}
+                >
+                  {downloadingPdf ? (
+                    <Loader2 className="size-4 animate-spin text-slate-500" />
+                  ) : (
+                    <FileText className="size-4 text-emerald-700" />
+                  )}
+                  {downloadingPdf ? "Generating PDF..." : "Download PDF"}
+                </Button>
+                <Button onClick={handleDownloadExcel} variant="outline" className="gap-2 border-slate-300 text-slate-700 hover:bg-slate-100" disabled={purchases.length === 0}>
+                  <Download className="size-4 text-slate-600" /> Download Excel
+                </Button>
+              </div>
               <div className="relative">
                 <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
                 <Input
