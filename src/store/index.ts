@@ -116,7 +116,12 @@ export async function fetchCached<T>(
   if (!isStale(masterCache[key])) {
     return masterCache[key]!.data as T[];
   }
-  const res = await fetch(url);
+  const separator = url.includes("?") ? "&" : "?";
+  const freshUrl = `${url}${separator}_t=${Date.now()}`;
+  const res = await fetch(freshUrl, {
+    cache: "no-store",
+    headers: { "Cache-Control": "no-cache, no-store, must-revalidate" },
+  });
   if (!res.ok) {
     // Only return stale cache on network/5xx errors — throw on 401/403 so pages can redirect
     if (res.status === 401 || res.status === 403) {

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabaseServerClient();
@@ -11,7 +14,7 @@ export async function GET(request: NextRequest) {
       .from("product_stock")
       .select("*, products(*)");
 
-    if (locationId) {
+    if (locationId && locationId !== "all") {
       query = query.eq("location_id", locationId);
     }
 
@@ -47,6 +50,17 @@ async function handleStockUpsert(request: NextRequest) {
     const locId = location_id !== undefined && location_id !== null ? Number(location_id) : 2;
     const qty = Number(stock_quantity) || 0;
     const bw = last_bag_weight_kg ? Number(last_bag_weight_kg) : 40;
+    const locName = locId === 1 ? "Farm" : "Shop";
+
+    // Ensure locations exist
+    try {
+      await supabase.from("locations").upsert([
+        { id: 1, name: "Farm", is_active: true },
+        { id: 2, name: "Shop", is_active: true },
+      ], { onConflict: "id" });
+    } catch {
+      // ignore
+    }
 
     // Check for existing record
     const { data: existing } = await supabase
@@ -56,12 +70,15 @@ async function handleStockUpsert(request: NextRequest) {
       .eq("location_id", locId)
       .maybeSingle();
 
+    let resultStock: any = null;
+
     if (existing) {
       const { data, error } = await supabase
         .from("product_stock")
         .update({
           stock_quantity: qty,
           last_bag_weight_kg: bw,
+          location: locName,
         })
         .eq("id", existing.id)
         .select()
@@ -70,13 +87,14 @@ async function handleStockUpsert(request: NextRequest) {
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 400 });
       }
-      return NextResponse.json({ success: true, stock: data });
+      resultStock = data;
     } else {
       const { data, error } = await supabase
         .from("product_stock")
         .insert({
           product_id,
           location_id: locId,
+          location: locName,
           stock_quantity: qty,
           last_bag_weight_kg: bw,
         })
@@ -86,9 +104,22 @@ async function handleStockUpsert(request: NextRequest) {
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 400 });
       }
-      return NextResponse.json({ success: true, stock: data });
+      resultStock = data;
     }
+
+    // Also update products table if stock_quantity column exists
+    try {
+      await supabase
+        .from("products")
+        .update({ stock_quantity: qty })
+        .eq("id", product_id);
+    } catch {
+      // ignore if column does not exist
+    }
+
+    return NextResponse.json({ success: true, stock: resultStock });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+

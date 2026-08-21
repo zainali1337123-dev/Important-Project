@@ -419,9 +419,9 @@ export default function DailyEntryPage() {
   // Find stock for the selected product AT THE SELECTED LOCATION.
   // Falls back to 0 if no stock row exists at that location.
   const stockEntry = stockData.find(
-    (s) => s.product_id === Number(productId) && s.location_id === locationId
+    (s) => Number(s.product_id) === Number(productId) && Number(s.location_id) === Number(locationId)
   );
-  const stockBags = stockEntry?.stock_quantity ?? 0;
+  const stockBags = stockEntry?.stock_quantity ?? (selectedProduct as any)?.stock_quantity ?? 0;
 
   const defaultRate = selectedProduct?.default_rate ?? 0;
   const quantityNum = parseFloat(quantity) || 0;
@@ -1257,7 +1257,7 @@ export default function DailyEntryPage() {
                       {cartItems.map((item, idx) => {
                         // Compute remaining stock for THIS product AT THE SELECTED LOCATION.
                         const entry = stockData.find(
-                          (s) => s.product_id === item.product_id && s.location_id === locationId
+                          (s) => Number(s.product_id) === Number(item.product_id) && Number(s.location_id) === Number(locationId)
                         );
                         const currentBags = entry?.stock_quantity ?? 0;
                         const bw = item.bag_weight_kg ?? (entry?.last_bag_weight_kg ?? 50);

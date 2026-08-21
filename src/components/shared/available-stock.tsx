@@ -154,7 +154,7 @@ export function AvailableStock({
   const stockByProduct = useMemo(() => {
     const stockMap = new Map<string, ProductStock>();
     for (const s of stockData) {
-      const key = `${s.product_id}:${s.location_id ?? "null"}`;
+      const key = `${Number(s.product_id)}:${Number(s.location_id ?? 0)}`;
       stockMap.set(key, s);
     }
 
@@ -168,13 +168,13 @@ export function AvailableStock({
         let totalBags = 0;
         let totalKg = 0;
         for (const loc of locations) {
-          const entry = stockMap.get(`${p.id}:${loc.id}`);
-          const bags = entry?.stock_quantity ?? 0;
-          const bw = entry?.last_bag_weight_kg ?? null;
+          const entry = stockMap.get(`${Number(p.id)}:${Number(loc.id)}`);
+          const bags = entry?.stock_quantity ?? (p as any).stock_quantity ?? 0;
+          const bw = entry?.last_bag_weight_kg ?? (p as any).default_bag_weight_kg ?? null;
           const kg = bw != null ? bags * bw : 0;
-          byLocation[loc.id] = { bags, kg, lastBagWeight: bw };
-          totalBags += bags;
-          totalKg += kg;
+          byLocation[loc.id] = { bags: Number(bags) || 0, kg: Number(kg) || 0, lastBagWeight: bw };
+          totalBags += Number(bags) || 0;
+          totalKg += Number(kg) || 0;
         }
         return { product: p, byLocation, totalBags, totalKg };
       })

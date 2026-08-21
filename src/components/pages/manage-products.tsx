@@ -281,13 +281,13 @@ export default function ManageProducts() {
         const { downloadExcel } = await import("@/lib/download-excel");
         const rows = list.map((p) => {
           const stockEntry = stockData.find(
-            (s) => s.product_id === p.id && s.location_id === locationId
+            (s) => Number(s.product_id) === Number(p.id) && Number(s.location_id) === Number(locationId)
           );
           return {
             id: p.id,
             name: p.name,
             default_rate: p.default_rate,
-            stock_bags: stockEntry?.stock_quantity ?? 0,
+            stock_bags: stockEntry?.stock_quantity ?? (p as any).stock_quantity ?? 0,
             is_active: p.is_active ? "Yes" : "No",
             created_at: p.created_at,
           };
@@ -434,9 +434,9 @@ export default function ManageProducts() {
                     <TableCell className="text-center">
                       {(() => {
                         const entry = stockData.find(
-                          (s) => s.product_id === product.id && s.location_id === locationId
+                          (s) => Number(s.product_id) === Number(product.id) && Number(s.location_id) === Number(locationId)
                         );
-                        const stock = entry?.stock_quantity ?? 0;
+                        const stock = entry?.stock_quantity ?? (product as any).stock_quantity ?? 0;
                         return (
                           <span className={cn("inline-flex items-center gap-1 text-sm font-medium px-2.5 py-0.5 rounded-full", stock > 0 ? "text-emerald-700 bg-emerald-50" : "text-red-600 bg-red-50")}>
                             {stock} bags
@@ -542,9 +542,9 @@ export default function ManageProducts() {
                     <TableCell className="text-center">
                       {(() => {
                         const entry = stockData.find(
-                          (s) => s.product_id === product.id && s.location_id === locationId
+                          (s) => Number(s.product_id) === Number(product.id) && Number(s.location_id) === Number(locationId)
                         );
-                        const stock = entry?.stock_quantity ?? 0;
+                        const stock = entry?.stock_quantity ?? (product as any).stock_quantity ?? 0;
                         return (
                           <span className="text-sm text-slate-500 font-medium">
                             {stock} bags

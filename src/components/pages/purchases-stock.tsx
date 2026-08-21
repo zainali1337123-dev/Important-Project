@@ -137,16 +137,16 @@ export default function PurchasesStockPage() {
     return products.map((p) => {
       // Find stock for this product AT THE SELECTED location
       const entry = stockData.find(
-        (s) => s.product_id === p.id && s.location_id === stockLocationId
+        (s) => Number(s.product_id) === Number(p.id) && Number(s.location_id) === Number(stockLocationId)
       );
-      const bags = entry?.stock_quantity ?? 0;
-      const bw = entry?.last_bag_weight_kg ?? DEFAULT_BAG_WEIGHT;
+      const bags = entry?.stock_quantity ?? (p as any).stock_quantity ?? 0;
+      const bw = entry?.last_bag_weight_kg ?? (p as any).default_bag_weight_kg ?? DEFAULT_BAG_WEIGHT;
       return {
         productId: p.id,
         productName: p.name,
-        bagWeight: Number(bw),
-        bags: Number(bags),
-        totalKg: Number(bags) * Number(bw),
+        bagWeight: Number(bw) || 50,
+        bags: Number(bags) || 0,
+        totalKg: (Number(bags) || 0) * (Number(bw) || 50),
       };
     });
   }, [products, stockData, stockLocationId]);
@@ -492,6 +492,7 @@ export default function PurchasesStockPage() {
       resetForm();
       invalidateCache("stock");
       invalidateCache("suppliers");
+      invalidateCache("products");
       toast.success("Purchase recorded successfully!");
       await loadAllData();
     } catch (e: any) {
@@ -550,6 +551,7 @@ export default function PurchasesStockPage() {
       resetForm();
       invalidateCache("stock");
       invalidateCache("customers");
+      invalidateCache("products");
       toast.success("Settlement recorded successfully!");
       await loadAllData();
     } catch (e: any) {
@@ -564,7 +566,10 @@ export default function PurchasesStockPage() {
       const res = await fetch(`/api/purchases?id=${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(await apiError(res, "Failed to delete purchase"));
       setPurchases((prev) => prev.filter((p) => p.id !== id));
-      toast.success("Purchase deleted.");
+      invalidateCache("stock");
+      invalidateCache("products");
+      await loadAllData();
+      toast.success("Purchase deleted and stock restored.");
     } catch (e: any) {
       toast.error(e.message || "Failed to delete purchase");
     }
@@ -1269,7 +1274,7 @@ export default function PurchasesStockPage() {
                 <CardDescription>
                   {historySearchDebounced.trim()
                     ? `${filteredPurchases.length} match${filteredPurchases.length !== 1 ? "es" : ""} for "${historySearchDebounced.trim()}" • Showing ${pagedPurchases.length} of ${filteredPurchases.length}`
-                    : `${purchases.length} purchase${purchases.length !== 1 && "s"} recorded • Showing ${pagedPurchases.length} of ${purchases.length}`}
+                    : `${purchases.length} purchase${purchases.length !== 1 ? "s" : ""} recorded • Showing ${pagedPurchases.length} of ${purchases.length}`}
                 </CardDescription>
               </div>
               <Button onClick={handleDownloadExcel} variant="outline" className="gap-2 border-slate-300 text-slate-700 hover:bg-slate-100" disabled={purchases.length === 0}>

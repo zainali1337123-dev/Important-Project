@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabaseServerClient();
@@ -46,6 +49,18 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Helper: Ensure locations are present to satisfy foreign keys
+async function ensureLocations(supabase: any) {
+  try {
+    await supabase.from("locations").upsert([
+      { id: 1, name: "Farm", is_active: true },
+      { id: 2, name: "Shop", is_active: true },
+    ], { onConflict: "id" });
+  } catch {
+    // ignore if table doesn't allow upsert
+  }
+}
+
 // Helper: Increment inventory stock on purchase
 async function incrementProductStock(
   supabase: any,
@@ -55,40 +70,71 @@ async function incrementProductStock(
   unitType: string,
   bagWeightKg: number
 ) {
-  try {
-    const qtyBags = unitType === "kg" ? quantity / (bagWeightKg || 40) : quantity;
-    const locName = locationId === 1 ? "Farm" : "Shop";
+  const qtyBags = unitType === "kg" ? quantity / (bagWeightKg || 40) : quantity;
+  const locId = Number(locationId) || 2;
+  const locName = locId === 1 ? "Farm" : "Shop";
 
-    const { data: existing } = await supabase
+  await ensureLocations(supabase);
+
+  // 1. Update or Insert product_stock (per location)
+  const { data: existing, error: findErr } = await supabase
+    .from("product_stock")
+    .select("*")
+    .eq("product_id", productId)
+    .eq("location_id", locId)
+    .maybeSingle();
+
+  if (existing) {
+    const newStock = (Number(existing.stock_quantity) || 0) + qtyBags;
+    const { error: updateErr } = await supabase
       .from("product_stock")
-      .select("*")
-      .eq("product_id", productId)
-      .eq("location_id", locationId)
-      .maybeSingle();
+      .update({
+        stock_quantity: newStock,
+        last_bag_weight_kg: bagWeightKg || existing.last_bag_weight_kg || 40,
+        location: locName,
+      })
+      .eq("id", existing.id);
 
-    if (existing) {
-      const newStock = (Number(existing.stock_quantity) || 0) + qtyBags;
-      await supabase
-        .from("product_stock")
-        .update({
-          stock_quantity: newStock,
-          last_bag_weight_kg: bagWeightKg || existing.last_bag_weight_kg || 40,
-          location: locName,
-        })
-        .eq("id", existing.id);
-    } else {
-      await supabase.from("product_stock").insert([
+    if (updateErr) {
+      console.error("Failed to update product_stock:", updateErr);
+      throw new Error(`Failed to update stock quantity: ${updateErr.message}`);
+    }
+  } else {
+    const { error: insertErr } = await supabase
+      .from("product_stock")
+      .insert([
         {
           product_id: productId,
-          location_id: locationId,
+          location_id: locId,
           location: locName,
           stock_quantity: qtyBags,
           last_bag_weight_kg: bagWeightKg || 40,
         },
       ]);
+
+    if (insertErr) {
+      console.error("Failed to insert product_stock:", insertErr);
+      throw new Error(`Failed to insert stock record: ${insertErr.message}`);
     }
-  } catch (err) {
-    console.error("Failed to increment product stock on purchase:", err);
+  }
+
+  // 2. Also update products table if stock_quantity column is present
+  try {
+    const { data: prod } = await supabase
+      .from("products")
+      .select("id, stock_quantity")
+      .eq("id", productId)
+      .maybeSingle();
+
+    if (prod && "stock_quantity" in prod) {
+      const currentQty = Number(prod.stock_quantity) || 0;
+      await supabase
+        .from("products")
+        .update({ stock_quantity: currentQty + qtyBags })
+        .eq("id", productId);
+    }
+  } catch {
+    // Column might not exist on products table, which is fine
   }
 }
 
@@ -101,27 +147,50 @@ async function decrementProductStock(
   unitType: string,
   bagWeightKg: number
 ) {
-  try {
-    const qtyBags = unitType === "kg" ? quantity / (bagWeightKg || 40) : quantity;
-    const { data: existing } = await supabase
+  const qtyBags = unitType === "kg" ? quantity / (bagWeightKg || 40) : quantity;
+  const locId = Number(locationId) || 2;
+
+  // 1. Decrement in product_stock
+  const { data: existing } = await supabase
+    .from("product_stock")
+    .select("*")
+    .eq("product_id", productId)
+    .eq("location_id", locId)
+    .maybeSingle();
+
+  if (existing) {
+    const newStock = Math.max(0, (Number(existing.stock_quantity) || 0) - qtyBags);
+    await supabase
       .from("product_stock")
-      .select("*")
-      .eq("product_id", productId)
-      .eq("location_id", locationId)
+      .update({ stock_quantity: newStock })
+      .eq("id", existing.id);
+  }
+
+  // 2. Also decrement in products table if column exists
+  try {
+    const { data: prod } = await supabase
+      .from("products")
+      .select("id, stock_quantity")
+      .eq("id", productId)
       .maybeSingle();
 
-    if (existing) {
-      const newStock = Math.max(0, (Number(existing.stock_quantity) || 0) - qtyBags);
-      await supabase.from("product_stock").update({ stock_quantity: newStock }).eq("id", existing.id);
+    if (prod && "stock_quantity" in prod) {
+      const currentQty = Number(prod.stock_quantity) || 0;
+      await supabase
+        .from("products")
+        .update({ stock_quantity: Math.max(0, currentQty - qtyBags) })
+        .eq("id", productId);
     }
-  } catch (err) {
-    console.error("Failed to decrement product stock on purchase revert:", err);
+  } catch {
+    // Column might not exist
   }
 }
 
 export async function POST(request: NextRequest) {
+  const supabase = getSupabaseServerClient();
+  let insertedPurchaseId: number | null = null;
+
   try {
-    const supabase = getSupabaseServerClient();
     const body = await request.json();
     const {
       purchase_date,
@@ -197,19 +266,32 @@ export async function POST(request: NextRequest) {
       error = retryResult.error;
     }
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error || !data) {
+      return NextResponse.json({ error: error?.message || "Failed to record purchase" }, { status: 400 });
     }
 
-    // Increment stock
-    await incrementProductStock(
-      supabase,
-      Number(product_id),
-      locId,
-      qty,
-      unit_type || "bags",
-      bag_weight_kg ? Number(bag_weight_kg) : 40
-    );
+    insertedPurchaseId = data.id;
+
+    // Mutate and increment inventory stock atomically
+    try {
+      await incrementProductStock(
+        supabase,
+        Number(product_id),
+        locId,
+        qty,
+        unit_type || "bags",
+        bag_weight_kg ? Number(bag_weight_kg) : 40
+      );
+    } catch (stockErr: any) {
+      // Rollback purchase record if stock mutation failed
+      if (insertedPurchaseId) {
+        await supabase.from("purchases").delete().eq("id", insertedPurchaseId);
+      }
+      return NextResponse.json(
+        { error: `Stock update failed: ${stockErr.message}. Transaction rolled back.` },
+        { status: 500 }
+      );
+    }
 
     // Record cash outflow if cash was paid
     if (cash > 0 && data) {
@@ -234,8 +316,23 @@ export async function POST(request: NextRequest) {
       ]);
     }
 
-    return NextResponse.json({ purchase: data });
+    // Fetch updated stock for response
+    const { data: updatedStock } = await supabase
+      .from("product_stock")
+      .select("*")
+      .eq("product_id", Number(product_id))
+      .eq("location_id", locId)
+      .maybeSingle();
+
+    return NextResponse.json({
+      success: true,
+      purchase: data,
+      stock: updatedStock,
+    });
   } catch (err: any) {
+    if (insertedPurchaseId) {
+      await supabase.from("purchases").delete().eq("id", insertedPurchaseId);
+    }
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
