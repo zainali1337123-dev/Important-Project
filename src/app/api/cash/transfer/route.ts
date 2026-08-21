@@ -32,53 +32,99 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseServerClient();
     const body = await request.json();
-    const { transfer_date, from_account_id, to_account_id, amount, notes } = body;
+    const { transfer_date, from_account_id, to_account_id, amount, notes, entered_by } = body;
 
-    if (!from_account_id || !to_account_id || !amount) {
+    let fromId = Number(from_account_id);
+    let toId = Number(to_account_id);
+
+    if (!fromId || !toId || !amount) {
       return NextResponse.json({ error: "From account, To account, and amount are required" }, { status: 400 });
     }
 
     const amt = Number(amount);
+    if (amt <= 0) {
+      return NextResponse.json({ error: "Amount must be greater than zero" }, { status: 400 });
+    }
+
     const tDate = transfer_date || new Date().toISOString().split("T")[0];
 
-    // Insert transfer record
-    const { data: transfer, error: tErr } = await supabase
+    // Ensure accounts exist in cash_accounts table to prevent foreign key errors
+    try {
+      await supabase.from("cash_accounts").upsert([
+        { id: 1, name: "Cash In Hand" },
+        { id: 2, name: "Cash In Locker" },
+        { id: 3, name: "Cash Online" },
+      ], { onConflict: "id" });
+    } catch {
+      // Ignore if table doesn't support upsert or is pre-seeded
+    }
+
+    // Insert transfer record with fallback for schema differences
+    const transferPayload: Record<string, any> = {
+      transfer_date: tDate,
+      from_account_id: fromId,
+      to_account_id: toId,
+      amount: amt,
+      notes: notes || null,
+      entered_by: entered_by || "Zain",
+    };
+
+    let { data: transfer, error: tErr } = await supabase
       .from("cash_transfers")
-      .insert([
-        {
-          transfer_date: tDate,
-          from_account_id,
-          to_account_id,
-          amount: amt,
-          notes: notes || null,
-        },
-      ])
+      .insert([transferPayload])
       .select()
       .single();
+
+    if (tErr && tErr.message?.includes("column")) {
+      const fallbackPayload = {
+        transfer_date: tDate,
+        from_account_id: fromId,
+        to_account_id: toId,
+        amount: amt,
+        notes: notes || null,
+      };
+      const retryRes = await supabase
+        .from("cash_transfers")
+        .insert([fallbackPayload])
+        .select()
+        .single();
+      transfer = retryRes.data;
+      tErr = retryRes.error;
+    }
 
     if (tErr) {
       return NextResponse.json({ error: tErr.message }, { status: 400 });
     }
 
+    const transferId = transfer?.id || null;
+
     // Ledger entries (out from from_account, in to to_account)
     await supabase.from("cash_ledger").insert([
       {
         entry_date: tDate,
-        account_id: from_account_id,
+        account_id: fromId,
         amount: amt,
         type: "out",
-        description: `Transfer to account #${to_account_id}`,
+        direction: "out",
+        source_type: "transfer",
+        source_id: transferId,
+        description: `Transfer to account #${toId}${notes ? ` (${notes})` : ""}`,
         reference_type: "transfer",
-        reference_id: transfer.id,
+        reference_id: transferId,
+        entered_by: entered_by || "Zain",
       },
       {
         entry_date: tDate,
-        account_id: to_account_id,
+        account_id: toId,
         amount: amt,
         type: "in",
-        description: `Transfer from account #${from_account_id}`,
+        direction: "in",
+        source_type: "transfer",
+        source_id: transferId,
+        description: `Transfer from account #${fromId}${notes ? ` (${notes})` : ""}`,
         reference_type: "transfer",
-        reference_id: transfer.id,
+        reference_id: transferId,
+        entered_by: entered_by || "Zain",
       },
     ]);
 

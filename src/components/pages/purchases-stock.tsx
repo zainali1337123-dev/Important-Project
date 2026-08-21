@@ -240,11 +240,39 @@ export default function PurchasesStockPage() {
     return qty * r;
   }, [quantity, rate]);
 
-  const settlementValue = useMemo(() => {
+  const settlementTotalPurchaseValue = useMemo(() => {
     const qty = parseFloat(quantity) || 0;
     const r = parseFloat(rate) || 0;
     return qty * r;
   }, [quantity, rate]);
+
+  const settlementCashPaidNum = useMemo(() => {
+    const cp = parseFloat(cashPaid) || 0;
+    if (isNaN(cp) || cp < 0) return 0;
+    if (settlementTotalPurchaseValue > 0 && cp > settlementTotalPurchaseValue) {
+      return settlementTotalPurchaseValue;
+    }
+    return cp;
+  }, [cashPaid, settlementTotalPurchaseValue]);
+
+  const settlementDebtReduction = useMemo(() => {
+    return Math.max(0, settlementTotalPurchaseValue - settlementCashPaidNum);
+  }, [settlementTotalPurchaseValue, settlementCashPaidNum]);
+
+  const settlementHelperText = useMemo(() => {
+    if (settlementTotalPurchaseValue === 0) {
+      return "Enter quantity and rate to calculate the settlement breakdown.";
+    }
+    if (settlementCashPaidNum === 0) {
+      return `Full amount reduces customer debt by Rs. ${fmt(settlementTotalPurchaseValue)}.`;
+    }
+    if (settlementCashPaidNum >= settlementTotalPurchaseValue) {
+      return `Paid fully in cash (Rs. ${fmt(settlementTotalPurchaseValue)}). Customer debt remains untouched.`;
+    }
+    return `Paid Rs. ${fmt(settlementCashPaidNum)} in cash. Reduces customer debt by Rs. ${fmt(settlementDebtReduction)}.`;
+  }, [settlementTotalPurchaseValue, settlementCashPaidNum, settlementDebtReduction]);
+
+  const settlementValue = settlementDebtReduction;
 
   const totalCashPaid = useMemo(
     () => purchases.reduce((sum, p) => sum + p.cash_paid, 0),
@@ -477,6 +505,10 @@ export default function PurchasesStockPage() {
     const qty = parseFloat(quantity) || 0;
     const r = parseFloat(rate) || 0;
     const bw = parseFloat(bagWeight) || 0;
+    const totalPurchaseValue = qty * r;
+    const rawCashPaid = parseFloat(cashPaid) || 0;
+    const cp = Math.max(0, Math.min(totalPurchaseValue, isNaN(rawCashPaid) ? 0 : rawCashPaid));
+    const debtReduction = Math.max(0, totalPurchaseValue - cp);
     const product = products.find((p) => p.id === Number(selectedProduct));
     const customer = customers.find((c) => c.id === Number(selectedCustomer));
 
@@ -491,6 +523,9 @@ export default function PurchasesStockPage() {
 
     setSaving(true);
     try {
+      const breakdownNote = `Total: Rs. ${fmt(totalPurchaseValue)} | Cash Paid: Rs. ${fmt(cp)} | Debt Credit: Rs. ${fmt(debtReduction)}`;
+      const finalNotes = notes?.trim() ? `${notes.trim()} (${breakdownNote})` : breakdownNote;
+
       const res = await fetch("/api/purchases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -501,9 +536,9 @@ export default function PurchasesStockPage() {
           rate_per_bag: r,
           supplier_id: null,
           settled_by_customer_id: customer.id,
-          cash_paid: 0,
+          cash_paid: cp,
           location_id: purchaseLocationId,
-          notes: notes?.trim() || null,
+          notes: finalNotes,
           unit_type: purchaseUnit,
           bag_weight_kg: purchaseUnit === "bags" ? bw : null,
         }),
@@ -513,6 +548,8 @@ export default function PurchasesStockPage() {
         throw new Error(err.detail || err.error || "Failed to record settlement");
       }
       resetForm();
+      invalidateCache("stock");
+      invalidateCache("customers");
       toast.success("Settlement recorded successfully!");
       await loadAllData();
     } catch (e: any) {
@@ -1143,21 +1180,77 @@ export default function PurchasesStockPage() {
                     <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Quantity <span className="font-normal normal-case text-slate-400">({purchaseUnit === "bags" ? "bags" : "kg"})</span></Label>
                     <Input type="number" placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} min="0" />
                   </div>
+                  {purchaseUnit === "bags" && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Bag Weight (kg)</Label>
+                      <Input type="number" placeholder="50" value={bagWeight} onChange={(e) => setBagWeight(e.target.value)} min="0" />
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Rate <span className="font-normal normal-case text-slate-400">(per {purchaseUnit === "bags" ? "bag" : "kg"})</span></Label>
                     <Input type="number" placeholder="0" value={rate} onChange={(e) => setRate(e.target.value)} min="0" />
                   </div>
                 </div>
-                <div className="flex items-center justify-between rounded-lg bg-violet-100/60 px-4 py-3 border border-violet-200/60">
-                  <span className="text-sm font-semibold text-violet-800">This reduces their debt by</span>
-                  <span className="text-lg font-extrabold text-violet-700">Rs. {fmt(settlementValue)}</span>
+
+                {/* Settlement Breakdown Section */}
+                <div className="rounded-xl border border-violet-200/80 bg-white p-4 space-y-3 shadow-xs">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <span className="text-xs font-bold uppercase tracking-wider text-violet-900">Settlement Breakdown</span>
+                    <span className="text-xs text-slate-500 font-medium">Auto-Calculated Split</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="rounded-lg bg-slate-50 p-3 border border-slate-200/70">
+                      <span className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Total Purchase Value</span>
+                      <span className="block text-base font-extrabold text-slate-900 mt-0.5">Rs. {fmt(settlementTotalPurchaseValue)}</span>
+                    </div>
+
+                    <div className="rounded-lg bg-amber-50/50 p-3 border border-amber-200/70">
+                      <Label className="block text-[11px] font-semibold text-amber-900 uppercase tracking-wide mb-1">Cash Paid to Customer (Rs.)</Label>
+                      <Input
+                        type="number"
+                        placeholder="0"
+                        value={cashPaid}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const num = parseFloat(val) || 0;
+                          if (num > settlementTotalPurchaseValue && settlementTotalPurchaseValue > 0) {
+                            setCashPaid(String(settlementTotalPurchaseValue));
+                          } else {
+                            setCashPaid(val);
+                          }
+                        }}
+                        min="0"
+                        max={settlementTotalPurchaseValue || undefined}
+                        className="h-8 text-sm font-semibold bg-white border-amber-300 focus-visible:ring-amber-500"
+                      />
+                    </div>
+
+                    <div className="rounded-lg bg-violet-50 p-3 border border-violet-200/70">
+                      <span className="block text-[11px] font-semibold text-violet-800 uppercase tracking-wide">Debt Reduction Amount</span>
+                      <span className="block text-base font-extrabold text-violet-700 mt-0.5">Rs. {fmt(settlementDebtReduction)}</span>
+                    </div>
+                  </div>
+
+                  {/* Dynamic helper text */}
+                  <div className={cn(
+                    "text-xs font-medium px-3 py-2 rounded-lg border",
+                    settlementCashPaidNum === 0
+                      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                      : settlementCashPaidNum >= settlementTotalPurchaseValue && settlementTotalPurchaseValue > 0
+                        ? "bg-amber-50 text-amber-800 border-amber-200"
+                        : "bg-violet-50 text-violet-800 border-violet-200"
+                  )}>
+                    {settlementHelperText}
+                  </div>
                 </div>
+
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Notes (optional)</Label>
                   <Textarea placeholder="Any notes about this settlement…" value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[60px] resize-none" />
                 </div>
                 <div className="flex justify-end">
-                  <Button onClick={handleRecordSettlement} className="gap-2 bg-violet-600 hover:bg-violet-700" disabled={saving}>
+                  <Button onClick={handleRecordSettlement} className="gap-2 bg-violet-600 hover:bg-violet-700 text-white font-medium" disabled={saving}>
                     {saving ? <Loader2 className="size-4 animate-spin" /> : <UserCheck className="size-4" />} Record Settlement
                   </Button>
                 </div>
@@ -1250,7 +1343,15 @@ export default function PurchasesStockPage() {
                               <TableCell className="text-sm text-slate-700 text-right font-mono">{getQuantityLabel(p)}</TableCell>
                               <TableCell className="text-sm text-slate-700 text-right font-mono">{fmt(p.rate_per_bag)}</TableCell>
                               <TableCell className="text-sm text-slate-900 text-right font-mono font-semibold">{fmt(value)}</TableCell>
-                              <TableCell className="text-sm text-slate-700 text-right font-mono">{p.cash_paid > 0 ? fmt(p.cash_paid) : "—"}</TableCell>
+                              <TableCell className="text-sm text-slate-700 text-right font-mono">
+                                {p.cash_paid > 0 ? (
+                                  <span className="text-amber-700 font-semibold">{fmt(p.cash_paid)}</span>
+                                ) : isSettlement ? (
+                                  <span className="text-slate-400 text-xs">Rs. 0 (Debt)</span>
+                                ) : (
+                                  "—"
+                                )}
+                              </TableCell>
                               <TableCell className="text-center">
                                 <div className="flex items-center justify-center gap-1">
                                   <Button

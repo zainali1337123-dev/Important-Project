@@ -222,7 +222,14 @@ export default function CashManagementPage() {
     );
   }, [corrections, corrSearchDebounced]);
 
-  const accountIdByName = (name: string) => accounts.find((a) => a.name === name)?.id;
+  const accountIdByName = (name: string) => {
+    const found = accounts.find((a) => a.name?.toLowerCase().trim() === name.toLowerCase().trim());
+    if (found) return found.id;
+    if (name === HAND_ACCOUNT_NAME || name.toLowerCase().includes("hand") || name.toLowerCase().includes("shop")) return 1;
+    if (name === LOCKER_ACCOUNT_NAME || name.toLowerCase().includes("locker") || name.toLowerCase().includes("farm")) return 2;
+    if (name === ONLINE_ACCOUNT_NAME || name.toLowerCase().includes("online") || name.toLowerCase().includes("bank")) return 3;
+    return 1;
+  };
 
   const handleTransferSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

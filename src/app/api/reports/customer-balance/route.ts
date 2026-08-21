@@ -33,7 +33,10 @@ export async function GET(request: NextRequest) {
       const totalGoodsValue = (purchases || []).reduce((acc, p) => {
         const q = Number(p.quantity) || 0;
         const r = Number(p.rate_per_bag) || 0;
-        return acc + (q * r);
+        const cp = Number(p.cash_paid) || 0;
+        const totalVal = q * r;
+        const debtReduction = Math.max(0, totalVal - cp);
+        return acc + debtReduction;
       }, 0);
 
       const opening = Number(customer.opening_balance) || 0;
@@ -67,7 +70,7 @@ export async function GET(request: NextRequest) {
       supabase.from("customers").select("*").order("name", { ascending: true }),
       supabase.from("sales").select("customer_id, quantity, rate_per_bag, rickshaw_fare, cash_received"),
       supabase.from("customer_payments").select("customer_id, amount"),
-      supabase.from("purchases").select("settled_by_customer_id, quantity, rate_per_bag"),
+      supabase.from("purchases").select("settled_by_customer_id, quantity, rate_per_bag, cash_paid"),
     ]);
 
     if (cErr) {
@@ -100,7 +103,10 @@ export async function GET(request: NextRequest) {
       if (!cId) continue;
       const q = Number(pur.quantity) || 0;
       const r = Number(pur.rate_per_bag) || 0;
-      goodsMap[cId] = (goodsMap[cId] || 0) + (q * r);
+      const cp = Number(pur.cash_paid) || 0;
+      const totalVal = q * r;
+      const debtReduction = Math.max(0, totalVal - cp);
+      goodsMap[cId] = (goodsMap[cId] || 0) + debtReduction;
     }
 
     const balancesMap: Record<number, any> = {};

@@ -45,12 +45,7 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseServerClient();
     const body = await request.json();
-    const { account_id, account_name, direction, amount, description, reason, entry_date } = body;
-
-    const amt = Number(amount) || 0;
-    if (amt <= 0) {
-      return NextResponse.json({ error: "Valid amount is required" }, { status: 400 });
-    }
+    const { account_id, account_name, direction, amount, target, name, description, reason, entry_date } = body;
 
     let accId = Number(account_id);
     if (!accId && account_name) {
@@ -60,8 +55,50 @@ export async function POST(request: NextRequest) {
     }
     if (!accId) accId = 1;
 
-    const desc = reason || description || "Manual cash correction";
-    const dir = direction === "out" ? "out" : "in";
+    // Ensure accounts exist in cash_accounts table to prevent foreign key constraint violations
+    try {
+      await supabase.from("cash_accounts").upsert([
+        { id: 1, name: "Cash In Hand" },
+        { id: 2, name: "Cash In Locker" },
+        { id: 3, name: "Cash Online" },
+      ], { onConflict: "id" });
+    } catch {
+      // Ignore if already present
+    }
+
+    let amt = Number(amount) || 0;
+    let dir = direction === "out" ? "out" : "in";
+
+    // If `target` is provided (e.g. from cash management UI)
+    if (target !== undefined && target !== null && !isNaN(Number(target))) {
+      const targetVal = Number(target);
+      // Fetch current ledger entries for this account to compute current balance
+      const { data: ledgerEntries } = await supabase
+        .from("cash_ledger")
+        .select("amount, type, direction")
+        .eq("account_id", accId);
+
+      const currentBalance = (ledgerEntries || []).reduce((acc: number, entry: any) => {
+        const a = Number(entry.amount) || 0;
+        const d = entry.direction || entry.type;
+        return d === "out" ? acc - a : acc + a;
+      }, 0);
+
+      const diff = targetVal - currentBalance;
+      if (diff === 0) {
+        return NextResponse.json({ success: true, message: "Account is already at target balance" });
+      }
+
+      amt = Math.abs(diff);
+      dir = diff > 0 ? "in" : "out";
+    }
+
+    if (amt <= 0) {
+      return NextResponse.json({ error: "Valid correction amount is required" }, { status: 400 });
+    }
+
+    const desc = reason || description || `Manual cash correction (${dir === "in" ? "Add" : "Deduct"} Rs. ${amt})`;
+    const author = name || "Zain";
     const date = entry_date || new Date().toISOString().split("T")[0];
 
     const { data, error } = await supabase
@@ -75,7 +112,7 @@ export async function POST(request: NextRequest) {
           type: dir,
           description: desc,
           source_type: "correction",
-          entered_by: "Zain",
+          entered_by: author,
         },
       ])
       .select()

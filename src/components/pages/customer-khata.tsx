@@ -1148,26 +1148,30 @@ export default function CustomerKhataPage() {
                       <th className="text-left text-xs uppercase text-amber-700 font-semibold px-3 py-2.5">Product</th>
                       <th className="text-right text-xs uppercase text-amber-700 font-semibold px-3 py-2.5">Bags</th>
                       <th className="text-right text-xs uppercase text-amber-700 font-semibold px-3 py-2.5">Rate / Bag</th>
-                      <th className="text-right text-xs uppercase text-amber-700 font-semibold px-3 py-2.5">Total Amount</th>
+                      <th className="text-right text-xs uppercase text-amber-700 font-semibold px-3 py-2.5">Goods Value</th>
+                      <th className="text-right text-xs uppercase text-amber-700 font-semibold px-3 py-2.5">Cash Paid</th>
+                      <th className="text-right text-xs uppercase text-amber-700 font-semibold px-3 py-2.5">Debt Reduction</th>
                       <th className="text-center text-xs uppercase text-amber-700 font-semibold px-3 py-2.5">Location</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loadingPurchases ? (
                       <tr>
-                        <td colSpan={7} className="px-3 py-8 text-center">
+                        <td colSpan={9} className="px-3 py-8 text-center">
                           <Loader2 className="size-5 animate-spin text-slate-400 mx-auto" />
                         </td>
                       </tr>
                     ) : selectedPurchases.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-3 py-8 text-center text-slate-400 text-sm">
+                        <td colSpan={9} className="px-3 py-8 text-center text-slate-400 text-sm">
                           No purchases recorded from this customer.
                         </td>
                       </tr>
                     ) : (
                       selectedPurchases.map((pur, idx) => {
                         const total = (Number(pur.quantity) ?? 0) * (Number(pur.rate_per_bag) ?? 0);
+                        const cash = Number(pur.cash_paid) || 0;
+                        const debtRed = Math.max(0, total - cash);
                         const locName = locations.find((l) => l.id === pur.location_id)?.name ?? "—";
                         return (
                           <tr key={pur.id} className="border-b border-slate-50 last:border-b-0 hover:bg-amber-50/30">
@@ -1182,10 +1186,16 @@ export default function CustomerKhataPage() {
                             <td className="px-3 py-2.5 text-right tabular-nums">
                               Rs. {Number(pur.rate_per_bag).toLocaleString("en-PK")}
                             </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-medium text-slate-700">
+                              Rs. {fmt(total)}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-amber-800 font-semibold">
+                              {cash > 0 ? `Rs. ${fmt(cash)}` : "Rs. 0"}
+                            </td>
                             <td className="px-3 py-2.5 text-right">
                               <span className="inline-flex flex-col items-end">
-                                <span className="tabular-nums font-bold text-amber-800">Rs. {fmt(total)}</span>
-                                <span className="text-[0.6rem] text-slate-400 capitalize">{numberToWords(total)}</span>
+                                <span className="tabular-nums font-bold text-violet-800">Rs. {fmt(debtRed)}</span>
+                                <span className="text-[0.6rem] text-slate-400 capitalize">{numberToWords(debtRed)}</span>
                               </span>
                             </td>
                             <td className="px-3 py-2.5 text-center text-xs text-slate-600">{locName}</td>
@@ -1197,13 +1207,13 @@ export default function CustomerKhataPage() {
                   {selectedPurchases.length > 0 && (
                     <tfoot>
                       <tr className="bg-amber-50 border-t-2 border-amber-200">
-                        <td colSpan={5} className="px-3 py-3 text-right text-xs uppercase font-bold text-amber-700">
-                          Total Bought From Customer
+                        <td colSpan={7} className="px-3 py-3 text-right text-xs uppercase font-bold text-amber-700">
+                          Total Debt Reduction From Goods
                         </td>
                         <td className="px-3 py-3 text-right">
                           <span className="inline-flex flex-col items-end">
-                            <span className="tabular-nums font-extrabold text-amber-900">Rs. {fmt(selectedBalance?.total_goods_value ?? 0)}</span>
-                            <span className="text-[0.6rem] text-amber-700 capitalize">{numberToWords(selectedBalance?.total_goods_value ?? 0)}</span>
+                            <span className="tabular-nums font-extrabold text-violet-900">Rs. {fmt(selectedBalance?.total_goods_value ?? 0)}</span>
+                            <span className="text-[0.6rem] text-violet-700 capitalize">{numberToWords(selectedBalance?.total_goods_value ?? 0)}</span>
                           </span>
                         </td>
                         <td></td>

@@ -154,29 +154,48 @@ export async function POST(request: NextRequest) {
     const qty = Number(quantity) || 0;
     const rate = Number(rate_per_bag) || 0;
 
-    const { data, error } = await supabase
+    const insertPayload: Record<string, any> = {
+      purchase_date: effectiveDate,
+      product_id: Number(product_id),
+      quantity: qty,
+      rate_per_bag: rate,
+      supplier_id: supplier_id ? Number(supplier_id) : null,
+      settled_by_customer_id: settled_by_customer_id ? Number(settled_by_customer_id) : null,
+      cash_paid: cash,
+      location_id: locId,
+      location: locName,
+      notes: notes || remarks || null,
+      unit_type: unit_type || "bags",
+      bag_weight_kg: bag_weight_kg ? Number(bag_weight_kg) : 40,
+      entered_by: "Zain",
+    };
+
+    let { data, error } = await supabase
       .from("purchases")
-      .insert([
-        {
-          purchase_date: effectiveDate,
-          date: effectiveDate,
-          product_id: Number(product_id),
-          quantity: qty,
-          rate_per_bag: rate,
-          supplier_id: supplier_id ? Number(supplier_id) : null,
-          settled_by_customer_id: settled_by_customer_id ? Number(settled_by_customer_id) : null,
-          cash_paid: cash,
-          location_id: locId,
-          location: locName,
-          notes: notes || remarks || null,
-          remarks: notes || remarks || null,
-          unit_type: unit_type || "bags",
-          bag_weight_kg: bag_weight_kg ? Number(bag_weight_kg) : 40,
-          entered_by: "Zain",
-        },
-      ])
+      .insert([insertPayload])
       .select()
       .single();
+
+    // Fallback if schema doesn't have certain optional columns
+    if (error && error.message?.includes("column")) {
+      const simplifiedPayload = {
+        purchase_date: effectiveDate,
+        product_id: Number(product_id),
+        quantity: qty,
+        rate_per_bag: rate,
+        supplier_id: supplier_id ? Number(supplier_id) : null,
+        settled_by_customer_id: settled_by_customer_id ? Number(settled_by_customer_id) : null,
+        cash_paid: cash,
+        location_id: locId,
+      };
+      const retryResult = await supabase
+        .from("purchases")
+        .insert([simplifiedPayload])
+        .select()
+        .single();
+      data = retryResult.data;
+      error = retryResult.error;
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
@@ -194,10 +213,13 @@ export async function POST(request: NextRequest) {
 
     // Record cash outflow if cash was paid
     if (cash > 0 && data) {
+      const desc = settled_by_customer_id
+        ? `Cash paid for settlement purchase #${data.id}`
+        : `Purchase stock payment for product #${product_id}`;
+
       await supabase.from("cash_ledger").insert([
         {
           entry_date: effectiveDate,
-          date: effectiveDate,
           account_id: 1, // Cash in Hand
           location_id: locId,
           location: locName,
@@ -206,7 +228,7 @@ export async function POST(request: NextRequest) {
           amount: cash,
           source_type: "purchase",
           source_id: data.id,
-          description: `Purchase stock payment for product #${product_id}`,
+          description: desc,
           entered_by: "Zain",
         },
       ]);
