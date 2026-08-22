@@ -212,6 +212,33 @@ export async function POST(request: NextRequest) {
       cash_received: row.cash_received || 0,
     });
 
+    // Execute insert with fallback if optional columns (like date, location, transaction_group_id) don't exist in Supabase yet
+    async function safeInsertSales(rows: Record<string, any>[]) {
+      let res = await supabase.from("sales").insert(rows).select();
+      if (res.error && (res.error.message?.includes("column") || res.error.message?.includes("schema cache") || res.error.message?.includes("date") || res.error.message?.includes("location"))) {
+        // Strip optional newly added columns if table has older schema
+        const fallbackRows = rows.map((r) => {
+          const fb: Record<string, any> = {
+            customer_id: r.customer_id,
+            product_id: r.product_id,
+            quantity: r.quantity,
+            rate_per_bag: r.rate_per_bag,
+            sale_date: r.sale_date,
+            unit_type: r.unit_type || "bags",
+            bag_weight_kg: r.bag_weight_kg || 40,
+            location_id: r.location_id,
+            rickshaw_fare: r.rickshaw_fare || 0,
+            cash_received: r.cash_received || 0,
+          };
+          if (r.transaction_group_id) fb.transaction_group_id = r.transaction_group_id;
+          if (r.rickshaw_driver_name) fb.rickshaw_driver_name = r.rickshaw_driver_name;
+          return fb;
+        });
+        res = await supabase.from("sales").insert(fallbackRows).select();
+      }
+      return res;
+    }
+
     // Case 1: Multi-item sale (from Cart in Daily Entry)
     if (items && Array.isArray(items) && items.length > 0) {
       const groupId = transaction_group_id || `group_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -233,7 +260,7 @@ export async function POST(request: NextRequest) {
         })
       );
 
-      const { data, error } = await supabase.from("sales").insert(insertRows).select();
+      const { data, error } = await safeInsertSales(insertRows);
 
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 400 });
@@ -307,11 +334,11 @@ export async function POST(request: NextRequest) {
       transaction_group_id: transaction_group_id || null,
     });
 
-    const { data, error } = await supabase.from("sales").insert([insertPayload]).select().single();
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    const insertResult = await safeInsertSales([insertPayload]);
+    if (insertResult.error) {
+      return NextResponse.json({ error: insertResult.error.message }, { status: 400 });
     }
+    const data = insertResult.data?.[0];
 
     // Decrement stock
     await decrementProductStock(

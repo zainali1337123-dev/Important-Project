@@ -68,22 +68,35 @@ export async function POST(request: NextRequest) {
     const locName = locId === 1 ? "Farm" : "Shop";
     const amt = Number(amount) || 0;
 
-    const { data, error } = await supabase
+    let insertPayload: Record<string, any> = {
+      description: description.trim(),
+      amount: amt,
+      category: category || "General",
+      expense_date: effectiveDate,
+      date: effectiveDate,
+      location_id: locId,
+      location: locName,
+      entered_by: "Zain",
+    };
+
+    let { data, error } = await supabase
       .from("expenses")
-      .insert([
-        {
-          description: description.trim(),
-          amount: amt,
-          category: category || "General",
-          expense_date: effectiveDate,
-          date: effectiveDate,
-          location_id: locId,
-          location: locName,
-          entered_by: "Zain",
-        },
-      ])
+      .insert([insertPayload])
       .select()
       .single();
+
+    if (error && (error.message?.includes("category") || error.message?.includes("date") || error.message?.includes("location") || error.message?.includes("schema cache"))) {
+      // Fallback with minimal standard schema
+      const fallbackPayload: Record<string, any> = {
+        description: description.trim(),
+        amount: amt,
+        expense_date: effectiveDate,
+      };
+      if (locId) fallbackPayload.location_id = locId;
+      const fb = await supabase.from("expenses").insert([fallbackPayload]).select().single();
+      data = fb.data;
+      error = fb.error;
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
