@@ -62,6 +62,7 @@ interface CustomerForm {
   phone: string;
   type: "credit" | "cash";
   opening_balance: string;
+  credit_limit: string;
   is_active: boolean;
 }
 
@@ -70,6 +71,7 @@ const emptyForm: CustomerForm = {
   phone: "",
   type: "credit",
   opening_balance: "0",
+  credit_limit: "3000000",
   is_active: true,
 };
 
@@ -177,6 +179,7 @@ export default function ManageCustomersPage() {
           type: addForm.type,
           phone: addForm.phone.trim() || null,
           opening_balance: parseFloat(addForm.opening_balance) || 0,
+          credit_limit: parseFloat(addForm.credit_limit) >= 0 ? parseFloat(addForm.credit_limit) : 3000000,
         }),
       });
       if (!res.ok) {
@@ -205,6 +208,7 @@ export default function ManageCustomersPage() {
       phone: c.phone ?? "",
       type: c.type as "credit" | "cash",
       opening_balance: String(c.opening_balance ?? 0),
+      credit_limit: String(c.credit_limit ?? 3000000),
       is_active: c.is_active,
     });
   };
@@ -226,6 +230,7 @@ export default function ManageCustomersPage() {
           type: editForm.type,
           phone: editForm.phone.trim() || null,
           opening_balance: parseFloat(editForm.opening_balance) || 0,
+          credit_limit: parseFloat(editForm.credit_limit) >= 0 ? parseFloat(editForm.credit_limit) : 3000000,
           is_active: editForm.is_active,
         }),
       });
@@ -920,6 +925,26 @@ function CustomerFormFields({
         {parseFloat(form.opening_balance) > 0 && (
           <p className="text-[0.65rem] text-slate-400 capitalize">
             {numberToWords(parseFloat(form.opening_balance) || 0)}
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label>Credit Limit (Rs.) — Default 30 Lac (3,000,000)</Label>
+        <Input
+          type="number"
+          min="0"
+          step="100000"
+          placeholder="3000000"
+          value={form.credit_limit}
+          onChange={(e) => setForm({ ...form, credit_limit: e.target.value })}
+        />
+        <p className="text-[11px] text-slate-500 leading-tight">
+          Jab balance is limit se exceed hoga, dashboard par <strong>Over Credit Limit</strong> card alert karega.
+        </p>
+        {parseFloat(form.credit_limit) > 0 && (
+          <p className="text-[0.65rem] text-slate-400 capitalize">
+            {numberToWords(parseFloat(form.credit_limit) || 0)}
           </p>
         )}
       </div>

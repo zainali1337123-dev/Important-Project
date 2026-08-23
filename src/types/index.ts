@@ -34,6 +34,7 @@ export interface Customer extends NamedEntity {
   phone: string | null;
   opening_balance: number;
   advance_payment?: number;
+  credit_limit?: number;
   deleted_at?: string | null;
 }
 

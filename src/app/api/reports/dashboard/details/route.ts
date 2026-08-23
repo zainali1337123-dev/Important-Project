@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
           type: c.type || "credit",
           phone: c.phone || "—",
           active: c.is_active,
-          credit_limit: c.credit_limit || 0,
+          credit_limit: Number(c.credit_limit) > 0 ? Number(c.credit_limit) : 3_000_000,
           since: c.created_at ? new Date(c.created_at).toLocaleDateString("en-PK") : "—",
         }));
 
@@ -133,21 +133,71 @@ export async function GET(request: NextRequest) {
       }
       case "outstanding": {
         label = "Total Outstanding / Khata";
-        const { data: customers } = await supabase
-          .from("customers")
-          .select("*")
-          .is("deleted_at", null)
-          .gt("opening_balance", 0)
-          .order("opening_balance", { ascending: false });
+        const [
+          { data: customers },
+          { data: allSales },
+          { data: allPayments },
+          { data: allPurchases },
+        ] = await Promise.all([
+          supabase.from("customers").select("*").is("deleted_at", null).order("name", { ascending: true }),
+          supabase.from("sales").select("customer_id, quantity, rate_per_bag, rickshaw_fare, cash_received"),
+          supabase.from("customer_payments").select("customer_id, amount"),
+          supabase.from("purchases").select("settled_by_customer_id, quantity, rate_per_bag, cash_paid"),
+        ]);
 
-        rows = (customers || []).map((c: any) => ({
-          customer: c.name,
-          phone: c.phone || "—",
-          type: c.type || "credit",
-          total_bill: Number(c.opening_balance) || 0,
-          paid: Number(c.advance_payment) || 0,
-          balance: (Number(c.opening_balance) || 0) - (Number(c.advance_payment) || 0),
-        }));
+        const salesMap: Record<number, { bill: number; cash: number }> = {};
+        for (const s of (allSales || [])) {
+          const cId = Number(s.customer_id);
+          if (!cId) continue;
+          if (!salesMap[cId]) salesMap[cId] = { bill: 0, cash: 0 };
+          const q = Number(s.quantity) || 0;
+          const r = Number(s.rate_per_bag) || 0;
+          const f = Number(s.rickshaw_fare) || 0;
+          const cash = Number(s.cash_received) || 0;
+          salesMap[cId].bill += (q * r) + f;
+          salesMap[cId].cash += cash;
+        }
+
+        const paymentsMap: Record<number, number> = {};
+        for (const p of (allPayments || [])) {
+          const cId = Number(p.customer_id);
+          if (!cId) continue;
+          paymentsMap[cId] = (paymentsMap[cId] || 0) + (Number(p.amount) || 0);
+        }
+
+        const goodsMap: Record<number, number> = {};
+        for (const pur of (allPurchases || [])) {
+          const cId = Number(pur.settled_by_customer_id);
+          if (!cId) continue;
+          const q = Number(pur.quantity) || 0;
+          const r = Number(pur.rate_per_bag) || 0;
+          const cp = Number(pur.cash_paid) || 0;
+          const totalVal = q * r;
+          const debtReduction = Math.max(0, totalVal - cp);
+          goodsMap[cId] = (goodsMap[cId] || 0) + debtReduction;
+        }
+
+        rows = (customers || [])
+          .map((c: any) => {
+            const cId = Number(c.id);
+            const opening = Number(c.opening_balance) || 0;
+            const advance = Number(c.advance_payment) || 0;
+            const totalBill = salesMap[cId]?.bill || 0;
+            const totalCashPaid = (salesMap[cId]?.cash || 0) + (paymentsMap[cId] || 0);
+            const totalGoodsValue = goodsMap[cId] || 0;
+            const balanceDue = (opening + totalBill) - totalCashPaid - totalGoodsValue - advance;
+
+            return {
+              customer: c.name,
+              phone: c.phone || "—",
+              type: c.type || "credit",
+              total_bill: opening + totalBill,
+              paid: totalCashPaid + totalGoodsValue + advance,
+              balance: balanceDue,
+            };
+          })
+          .filter((r) => r.balance > 0)
+          .sort((a, b) => b.balance - a.balance);
 
         if (customerName) {
           rows = rows.filter((r) => r.customer.toLowerCase().includes(customerName));
@@ -156,22 +206,74 @@ export async function GET(request: NextRequest) {
       }
       case "over-credit": {
         label = "Over Credit Limit";
-        const { data: customers } = await supabase
-          .from("customers")
-          .select("*")
-          .is("deleted_at", null)
-          .gt("credit_limit", 0);
+        const [
+          { data: customers },
+          { data: allSales },
+          { data: allPayments },
+          { data: allPurchases },
+        ] = await Promise.all([
+          supabase.from("customers").select("*").is("deleted_at", null).order("name", { ascending: true }),
+          supabase.from("sales").select("customer_id, quantity, rate_per_bag, rickshaw_fare, cash_received"),
+          supabase.from("customer_payments").select("customer_id, amount"),
+          supabase.from("purchases").select("settled_by_customer_id, quantity, rate_per_bag, cash_paid"),
+        ]);
+
+        const salesMap: Record<number, { bill: number; cash: number }> = {};
+        for (const s of (allSales || [])) {
+          const cId = Number(s.customer_id);
+          if (!cId) continue;
+          if (!salesMap[cId]) salesMap[cId] = { bill: 0, cash: 0 };
+          const q = Number(s.quantity) || 0;
+          const r = Number(s.rate_per_bag) || 0;
+          const f = Number(s.rickshaw_fare) || 0;
+          const cash = Number(s.cash_received) || 0;
+          salesMap[cId].bill += (q * r) + f;
+          salesMap[cId].cash += cash;
+        }
+
+        const paymentsMap: Record<number, number> = {};
+        for (const p of (allPayments || [])) {
+          const cId = Number(p.customer_id);
+          if (!cId) continue;
+          paymentsMap[cId] = (paymentsMap[cId] || 0) + (Number(p.amount) || 0);
+        }
+
+        const goodsMap: Record<number, number> = {};
+        for (const pur of (allPurchases || [])) {
+          const cId = Number(pur.settled_by_customer_id);
+          if (!cId) continue;
+          const q = Number(pur.quantity) || 0;
+          const r = Number(pur.rate_per_bag) || 0;
+          const cp = Number(pur.cash_paid) || 0;
+          const totalVal = q * r;
+          const debtReduction = Math.max(0, totalVal - cp);
+          goodsMap[cId] = (goodsMap[cId] || 0) + debtReduction;
+        }
 
         rows = (customers || [])
-          .filter((c: any) => (Number(c.opening_balance) || 0) > (Number(c.credit_limit) || 0))
-          .map((c: any) => ({
-            customer: c.name,
-            phone: c.phone || "—",
-            credit_limit: Number(c.credit_limit) || 0,
-            total_bill: Number(c.opening_balance) || 0,
-            paid: Number(c.advance_payment) || 0,
-            balance: Number(c.opening_balance) || 0,
-          }));
+          .map((c: any) => {
+            const cId = Number(c.id);
+            const opening = Number(c.opening_balance) || 0;
+            const advance = Number(c.advance_payment) || 0;
+            const totalBill = salesMap[cId]?.bill || 0;
+            const totalCashPaid = (salesMap[cId]?.cash || 0) + (paymentsMap[cId] || 0);
+            const totalGoodsValue = goodsMap[cId] || 0;
+            const balanceDue = (opening + totalBill) - totalCashPaid - totalGoodsValue - advance;
+            const creditLimit = Number(c.credit_limit) > 0 ? Number(c.credit_limit) : 3_000_000;
+            const excess = Math.max(0, balanceDue - creditLimit);
+
+            return {
+              customer: c.name,
+              phone: c.phone || "—",
+              credit_limit: creditLimit,
+              total_bill: opening + totalBill,
+              paid: totalCashPaid + totalGoodsValue + advance,
+              balance: balanceDue,
+              excess,
+            };
+          })
+          .filter((r) => r.balance > r.credit_limit)
+          .sort((a, b) => b.excess - a.excess || b.balance - a.balance);
 
         if (customerName) {
           rows = rows.filter((r) => r.customer.toLowerCase().includes(customerName));

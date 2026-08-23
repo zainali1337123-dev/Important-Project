@@ -4,7 +4,9 @@ import { buildPurchaseReceiptCaption } from "@/lib/share-whatsapp";
 import {
   ensureUrduFontLoaded,
   hasUrdu,
+  renderTextToImageDataUrl,
   renderMultilineTextToImageDataUrl,
+  sanitizeUrduForPdf,
   type RenderedTextImage,
 } from "@/lib/pdf-urdu";
 
@@ -169,10 +171,28 @@ export async function generatePurchaseReceiptPDF(params: {
   doc.text("Phone:", leftX, y + 18);
   doc.text("Type:", leftX, y + 24);
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.setTextColor(...C_DARK);
-  doc.text(toTitleCase(counterpartyName).slice(0, 26), leftX + 22, y + 12);
+  if (hasUrdu(counterpartyName)) {
+    try {
+      const partyImg = renderTextToImageDataUrl(counterpartyName, {
+        fontSize: 9,
+        bold: true,
+        color: "#173337",
+        scale: 3,
+      });
+      const MM_PER_PT = 0.353;
+      doc.addImage(partyImg.dataUrl, "PNG", leftX + 22, y + 8.5, partyImg.widthPt * MM_PER_PT, partyImg.heightPt * MM_PER_PT);
+    } catch {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(...C_DARK);
+      doc.text(sanitizeUrduForPdf(counterpartyName).slice(0, 26), leftX + 22, y + 12);
+    }
+  } else {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...C_DARK);
+    doc.text(toTitleCase(counterpartyName).slice(0, 26), leftX + 22, y + 12);
+  }
   doc.setFontSize(8.5);
   doc.setFont("helvetica", "normal");
   doc.text(counterpartyPhone, leftX + 22, y + 18);
@@ -270,6 +290,12 @@ export async function generatePurchaseReceiptPDF(params: {
         prProductCellImages.has(hookData.row.index)
       ) {
         hookData.cell.text = hookData.cell.text.map(() => " ");
+      } else if (hookData.section === "body") {
+        const txt = Array.isArray(hookData.cell.text) ? hookData.cell.text.join(" ") : String(hookData.cell.text || "");
+        if (hasUrdu(txt)) {
+          const sanitized = sanitizeUrduForPdf(txt);
+          hookData.cell.text = sanitized ? [sanitized] : [" "];
+        }
       }
     },
     didDrawCell: (hookData) => {

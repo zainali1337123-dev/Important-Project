@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS customers (
   phone TEXT,
   opening_balance NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
   advance_payment NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+  credit_limit NUMERIC(14, 2) NOT NULL DEFAULT 3000000.00,
   is_active BOOLEAN NOT NULL DEFAULT true,
   deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

@@ -4,7 +4,9 @@ import { buildPurchaseBillCaption } from "@/lib/share-whatsapp";
 import {
   ensureUrduFontLoaded,
   hasUrdu,
+  renderTextToImageDataUrl,
   renderMultilineTextToImageDataUrl,
+  sanitizeUrduForPdf,
   type RenderedTextImage,
 } from "@/lib/pdf-urdu";
 
@@ -149,10 +151,29 @@ export async function generateBuyProductBillPDF(params: {
   doc.text("Phone:", leftX, y + 18);
   doc.text("Type:", leftX, y + 24);
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.setTextColor(...C_DARK);
-  doc.text(toTitleCase(customer?.name ?? "N/A").slice(0, 26), leftX + 22, y + 12);
+  const rawCustName = customer?.name ?? "N/A";
+  if (hasUrdu(rawCustName)) {
+    try {
+      const custImg = renderTextToImageDataUrl(rawCustName, {
+        fontSize: 9,
+        bold: true,
+        color: "#173337",
+        scale: 3,
+      });
+      const MM_PER_PT = 0.353;
+      doc.addImage(custImg.dataUrl, "PNG", leftX + 22, y + 8.5, custImg.widthPt * MM_PER_PT, custImg.heightPt * MM_PER_PT);
+    } catch {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(...C_DARK);
+      doc.text(sanitizeUrduForPdf(rawCustName).slice(0, 26), leftX + 22, y + 12);
+    }
+  } else {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...C_DARK);
+    doc.text(toTitleCase(rawCustName).slice(0, 26), leftX + 22, y + 12);
+  }
   doc.setFontSize(8.5);
   doc.setFont("helvetica", "normal");
   doc.text(customer?.phone || "—", leftX + 22, y + 18);
@@ -261,6 +282,12 @@ export async function generateBuyProductBillPDF(params: {
         bpProductCellImages.has(hookData.row.index)
       ) {
         hookData.cell.text = hookData.cell.text.map(() => " ");
+      } else if (hookData.section === "body") {
+        const txt = Array.isArray(hookData.cell.text) ? hookData.cell.text.join(" ") : String(hookData.cell.text || "");
+        if (hasUrdu(txt)) {
+          const sanitized = sanitizeUrduForPdf(txt);
+          hookData.cell.text = sanitized ? [sanitized] : [" "];
+        }
       }
     },
     didDrawCell: (hookData) => {

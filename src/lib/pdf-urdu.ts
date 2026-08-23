@@ -86,15 +86,93 @@ export function hasUrdu(text: string | null | undefined): boolean {
   return false;
 }
 
+/**
+ * Sanitize or extract clean Roman/English text from a bilingual or Urdu string.
+ * Used as a safe fallback when rendering plain text directly in PDF engines
+ * that lack embedded Arabic glyphs, preventing "Choker (þ®ù-þïù)" corruptions.
+ *
+ * Examples:
+ *   "Choker (چوکر)" -> "Choker"
+ *   "Wanda - ونڈا" -> "Wanda"
+ *   "Khal Binola / کھل بنولہ" -> "Khal Binola"
+ *   "چوکر" -> "Choker" (if known map exists) or sanitized text
+ */
+export function sanitizeUrduForPdf(text: string | null | undefined): string {
+  if (!text) return "";
+  
+  // Clean common garbled/mojibake patterns if corrupted
+  let cleaned = text
+    .replace(/[\u00FE\u00AE\u00F9\u00EF\u00D8\u00D9\u00DA\u00DB]+/g, "")
+    .replace(/\(\s*[-—–]?\s*\)/g, "")
+    .replace(/[-—–]\s*$/g, "")
+    .trim();
+
+  // If text contains both English and Urdu (e.g., "Choker (چوکر)" or "Choker - چوکر")
+  // Extract the English portion
+  const parenMatch = cleaned.match(/^([A-Za-z0-9\s\-_.#]+)\s*[\(\[（].*?[\)\]）]/);
+  if (parenMatch && parenMatch[1]?.trim()) {
+    return parenMatch[1].trim();
+  }
+
+  const dashMatch = cleaned.match(/^([A-Za-z0-9\s_.]+)\s*[-—–/|]\s*[\u0600-\u06FF\uFB50-\uFDFF\uFE70-\uFEFF]/);
+  if (dashMatch && dashMatch[1]?.trim()) {
+    return dashMatch[1].trim();
+  }
+
+  // If string contains only Urdu and has a known transliteration
+  const trimmed = cleaned.trim();
+  const knownUrduMap: Record<string, string> = {
+    "چوکر": "Choker",
+    "ونڈا": "Wanda",
+    "کھل": "Khal",
+    "بنولہ": "Binola",
+    "کھل بنولہ": "Khal Binola",
+    "مکئی": "Makai",
+    "گندم": "Gandam",
+    "توریہ": "Toria",
+    "شیرہ": "Sheera",
+    "رائس پالش": "Rice Polish",
+    "گلوٹن": "Gluten",
+    "ڈی ایل ایم": "DLM",
+    "چونا": "Choona",
+    "سویا بین": "Soyabean",
+    "سرسوں": "Sarson",
+    "سرسوں کھل": "Sarson Khal",
+    "کرایہ": "Fare",
+    "مزدوری": "Labor",
+    "لیبر": "Labor",
+  };
+
+  if (knownUrduMap[trimmed]) {
+    return knownUrduMap[trimmed];
+  }
+
+  // Filter out any unrenderable Arabic characters if string still has them
+  // to avoid Latin-1 mojibake in jsPDF
+  const withoutArabic = cleaned.replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g, "").trim();
+  if (withoutArabic.length > 0) {
+    return withoutArabic.replace(/\(\s*\)/g, "").replace(/[-—–]\s*$/g, "").trim();
+  }
+
+  return cleaned;
+}
+
+/**
+ * Extract clean English label from bilingual or formatted product name.
+ */
+export function extractEnglishName(text: string | null | undefined): string {
+  return sanitizeUrduForPdf(text);
+}
+
 /* ─── Font loading ─── */
 let fontLoadPromise: Promise<void> | null = null;
 
 /**
- * Pre-load the Noto Nastaliq Urdu font in the browser so it's ready
+ * Pre-load the Noto Nastaliq Urdu / Arabic font in the browser so it's ready
  * when we render. Safe to call multiple times — caches the promise.
  *
  * Uses CSS Font Loading API (document.fonts). Falls back gracefully
- * if the API is unavailable (just resolves, rendering will use fallback).
+ * to system Arabic fonts (Noto Sans Arabic, Amiri, Segoe UI, Tahoma).
  */
 export function ensureUrduFontLoaded(): Promise<void> {
   if (fontLoadPromise) return fontLoadPromise;
@@ -105,21 +183,17 @@ export function ensureUrduFontLoaded(): Promise<void> {
   fontLoadPromise = document.fonts
     .load('16px "Noto Nastaliq Urdu"')
     .then(() => {
-      // Also explicitly request the loaded status so the font is fully ready
-      // before we draw to canvas (otherwise first draw may use fallback font).
       return (document as any).fonts.ready;
     })
     .catch(() => {
-      // Font failed to load — silently fall back. hasUrdu() will still trigger
-      // canvas rendering, but browser will use its default Arabic font.
-      // That's still better than jsPDF's broken glyphs.
+      // Font failed to load — fallback system fonts will be used by canvas
     });
   return fontLoadPromise;
 }
 
 /* ─── Canvas rendering ───
  * We create an offscreen <canvas>, set up a 2D context with a high pixel
- * ratio for crisp output, draw the text, then export as PNG.
+ * ratio (3x) for crisp output, draw the text, then export as PNG.
  *
  * For mixed Roman+Urdu text (e.g. "Choker — چوکر"), we render it as a
  * single string on canvas — the browser handles LTR+RTL bidirectional
@@ -130,7 +204,7 @@ const DEFAULT_OPTS: Required<Omit<RenderTextOptions, "maxWidthPt" | "lineHeightP
   fontSize: 12,
   color: "#1e2832",
   latinFont: "Helvetica, Arial, sans-serif",
-  urduFont: '"Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", serif',
+  urduFont: '"Noto Nastaliq Urdu", "Noto Sans Arabic", "Amiri", "Segoe UI", Tahoma, "Arial Unicode MS", sans-serif',
   bold: false,
   scale: 3,
 };
@@ -372,3 +446,121 @@ export function splitByScript(text: string): TextSegment[] {
   if (current) segments.push({ text: current, isUrdu: currentIsUrdu });
   return segments;
 }
+
+/* ─── Universal autoTable Helpers for Full Urdu/Arabic Support ─── */
+
+/**
+ * Scan a 2D table array (head, body, foot) and pre-render any cell containing
+ * Urdu or Arabic characters into high-resolution canvas PNG images.
+ *
+ * @param tableData 2D array of string/any cell values
+ * @param columnWidthsPt Optional map of column index -> available width in pt
+ * @param defaultOpts Optional custom font/size/color options
+ */
+export function createTableUrduCellMap(
+  tableData: (string | any)[][],
+  columnWidthsPt?: Record<number, number>,
+  defaultOpts: RenderTextOptions = {}
+): Map<string, RenderedTextImage> {
+  const map = new Map<string, RenderedTextImage>();
+  if (typeof document === "undefined" || !tableData?.length) return map;
+
+  tableData.forEach((row, rowIdx) => {
+    if (!Array.isArray(row)) return;
+    row.forEach((cellVal, colIdx) => {
+      const text = typeof cellVal === "string" ? cellVal : cellVal != null ? String(cellVal) : "";
+      if (hasUrdu(text)) {
+        try {
+          const maxW = columnWidthsPt?.[colIdx] ?? 140;
+          const img = renderMultilineTextToImageDataUrl(text, {
+            fontSize: defaultOpts.fontSize ?? 8,
+            color: defaultOpts.color ?? "#28323c",
+            maxWidthPt: maxW,
+            scale: defaultOpts.scale ?? 3,
+            ...defaultOpts,
+          });
+          map.set(`${rowIdx}_${colIdx}`, img);
+        } catch (e) {
+          console.warn(`Urdu cell render failed at [${rowIdx}, ${colIdx}]:`, e);
+        }
+      }
+    });
+  });
+
+  return map;
+}
+
+/**
+ * Returns autoTable lifecycle hooks (`didParseCell` & `didDrawCell`) that:
+ * 1. Prevent jsPDF standard fonts from rendering garbled Latin-1 mojibake for Urdu strings.
+ * 2. Draw high-DPI canvas rendered PNGs with native Arabic shaping and RTL visual layout.
+ * 3. Gracefully sanitize unrendered Arabic characters to clean Roman text if canvas fails.
+ */
+export function getAutoTableUrduHooks(
+  cellMap: Map<string, RenderedTextImage>,
+  doc: any,
+  config: { paddingMm?: number; section?: "body" | "all" } = {}
+) {
+  const paddingMm = config.paddingMm ?? 2.2;
+  const section = config.section ?? "body";
+  const MM_PER_PT = 0.353;
+
+  return {
+    didParseCell: (hookData: any) => {
+      if (section === "body" && hookData.section !== "body") return;
+      const key = `${hookData.row.index}_${hookData.column.index}`;
+      
+      if (cellMap.has(key)) {
+        // Replace cell text with space strings to preserve row height without
+        // letting jsPDF attempt to write raw Unicode bytes with helvetica font
+        if (Array.isArray(hookData.cell.text)) {
+          hookData.cell.text = hookData.cell.text.map(() => " ");
+        } else {
+          hookData.cell.text = [" "];
+        }
+      } else {
+        // Safe fallback: if cell has Urdu but was not in image map, sanitize
+        // the text so it never prints corrupted "Choker (þ®ù-þïù)"
+        const originalText = Array.isArray(hookData.cell.text)
+          ? hookData.cell.text.join("\n")
+          : String(hookData.cell.text || "");
+        if (hasUrdu(originalText)) {
+          const sanitized = sanitizeUrduForPdf(originalText);
+          hookData.cell.text = sanitized ? [sanitized] : [" "];
+        }
+      }
+    },
+    didDrawCell: (hookData: any) => {
+      if (section === "body" && hookData.section !== "body") return;
+      const key = `${hookData.row.index}_${hookData.column.index}`;
+      if (!cellMap.has(key)) return;
+
+      const image = cellMap.get(key)!;
+      const cell = hookData.cell;
+      const maxWmm = cell.width - paddingMm * 2;
+      const maxHmm = cell.height - paddingMm * 2;
+
+      const imgWmm = image.widthPt * MM_PER_PT;
+      const imgHmm = image.heightPt * MM_PER_PT;
+      const scale = Math.min(maxWmm / imgWmm, maxHmm / imgHmm, 1);
+      const drawW = imgWmm * scale;
+      const drawH = imgHmm * scale;
+
+      // Center vertically, align based on cell halign
+      let imgX = cell.x + paddingMm;
+      if (cell.styles.halign === "right") {
+        imgX = cell.x + cell.width - paddingMm - drawW;
+      } else if (cell.styles.halign === "center") {
+        imgX = cell.x + (cell.width - drawW) / 2;
+      }
+      const imgY = cell.y + (cell.height - drawH) / 2;
+
+      try {
+        doc.addImage(image.dataUrl, "PNG", imgX, imgY, drawW, drawH);
+      } catch (e) {
+        console.warn("AutoTable Urdu image draw error:", e);
+      }
+    },
+  };
+}
+

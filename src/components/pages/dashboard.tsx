@@ -117,10 +117,9 @@ const columnsMap: Record<CardKey, Col[]> = {
   "over-credit": [
     { key: "customer", label: "Customer" },
     { key: "phone", label: "Phone" },
-    { key: "credit_limit", label: "Limit", align: "right", fmt: (v) => formatRs(v) },
-    { key: "total_bill", label: "Total Bill", align: "right", fmt: (v) => formatRs(v) },
-    { key: "paid", label: "Paid", align: "right", fmt: (v) => formatRs(v) },
-    { key: "balance", label: "Balance Due", align: "right", fmt: (v) => formatRs(v) },
+    { key: "credit_limit", label: "Credit Limit", align: "right", fmt: (v) => formatRs(v) },
+    { key: "balance", label: "Current Balance", align: "right", fmt: (v) => formatRs(v) },
+    { key: "excess", label: "Over Limit Amount", align: "right", fmt: (v) => formatRs(v) },
   ],
 };
 
@@ -550,6 +549,7 @@ export default function Dashboard() {
                               col.align === "right" ? "text-right font-medium" : "",
                               col.key === "balance" && row.balance > 0 ? "text-red-600 font-semibold" : "",
                               col.key === "balance" && row.balance <= 0 ? "text-green-600" : "",
+                              col.key === "excess" && row.excess > 0 ? "text-[#C28A24] font-bold" : "",
                             )}
                           >
                             {col.fmt ? col.fmt(row[col.key], row) : String(row[col.key] ?? "—")}

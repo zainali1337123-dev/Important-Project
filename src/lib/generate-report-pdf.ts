@@ -2,6 +2,8 @@ import {
   ensureUrduFontLoaded,
   hasUrdu,
   renderMultilineTextToImageDataUrl,
+  createTableUrduCellMap,
+  getAutoTableUrduHooks,
   type RenderedTextImage,
 } from "@/lib/pdf-urdu";
 import { numberToRupeeWords } from "@/lib/number-to-words";
@@ -254,7 +256,6 @@ export async function generateSalesReportPDF(params: SalesReportParams): Promise
 
   // Build Table Rows
   const tableData: string[][] = [];
-  const urduCellImages = new Map<number, RenderedTextImage>();
 
   let rowIdx = 0;
   sales.forEach((s) => {
@@ -287,26 +288,19 @@ export async function generateSalesReportPDF(params: SalesReportParams): Promise
       formatRs(rem),
     ]);
 
-    // Check Urdu
-    if (hasUrdu(customerName) || hasUrdu(productCell)) {
-      try {
-        const fullUrduText = hasUrdu(productCell) ? productCell : customerName;
-        const img = renderMultilineTextToImageDataUrl(fullUrduText, {
-          fontSize: 8,
-          color: "#28323c",
-          scale: 3,
-        });
-        urduCellImages.set(rowIdx, img);
-      } catch (e) {
-        console.warn("Urdu render error:", e);
-      }
-    }
-
     rowIdx++;
   });
 
+  const urduCellMap = createTableUrduCellMap(
+    tableData,
+    { 1: 30 * 2.835, 4: 53 * 2.835 },
+    { fontSize: 7.8, color: "#28323c", scale: 3 }
+  );
+  const urduHooks = getAutoTableUrduHooks(urduCellMap, doc, { paddingMm: 2 });
+
   autoTable(doc, {
     startY: y,
+    ...urduHooks,
     head: [
       [
         "#",
@@ -451,8 +445,16 @@ export async function generateExpensesReportPDF(params: ExpensesReportParams): P
     `Rs. ${formatRs(e.amount)}`,
   ]);
 
+  const expensesUrduCellMap = createTableUrduCellMap(
+    tableData,
+    { 2: 95 * 2.835 },
+    { fontSize: 8.5, color: "#28323c", scale: 3 }
+  );
+  const expensesUrduHooks = getAutoTableUrduHooks(expensesUrduCellMap, doc, { paddingMm: 3 });
+
   autoTable(doc, {
     startY: y,
+    ...expensesUrduHooks,
     head: [["#", "Date", "Expense Description", "Amount (Rs.)"]],
     body: tableData,
     foot: [["", "", "TOTAL EXPENSES", `Rs. ${formatRs(totalExpense)}`]],
@@ -593,8 +595,16 @@ export async function generateCustomerPaymentsReportPDF(params: CustomerPayments
     ];
   });
 
+  const payUrduCellMap = createTableUrduCellMap(
+    tableData,
+    { 1: 38 * 2.835, 7: 24 * 2.835 },
+    { fontSize: 7.8, color: "#28323c", scale: 3 }
+  );
+  const payUrduHooks = getAutoTableUrduHooks(payUrduCellMap, doc, { paddingMm: 2.2 });
+
   autoTable(doc, {
     startY: y,
+    ...payUrduHooks,
     head: [
       [
         "#",
@@ -775,8 +785,16 @@ export async function generatePurchasesReportPDF(params: PurchasesReportParams):
     ];
   });
 
+  const purUrduCellMap = createTableUrduCellMap(
+    tableData,
+    { 2: 43 * 2.835, 4: 43 * 2.835, 9: 33 * 2.835 },
+    { fontSize: 7.8, color: "#28323c", scale: 3 }
+  );
+  const purUrduHooks = getAutoTableUrduHooks(purUrduCellMap, doc, { paddingMm: 2 });
+
   autoTable(doc, {
     startY: y,
+    ...purUrduHooks,
     head: [
       [
         "#",
@@ -995,8 +1013,16 @@ export async function generateDayEndSupervisorSummaryPDF(params: DayEndReportPar
     formatRs(s.cash_received),
   ]);
 
+  const daySalesUrduCellMap = createTableUrduCellMap(
+    salesRows,
+    { 1: 43 * 2.835, 2: 43 * 2.835 },
+    { fontSize: 7.2, color: "#28323c", scale: 3 }
+  );
+  const daySalesUrduHooks = getAutoTableUrduHooks(daySalesUrduCellMap, doc, { paddingMm: 1.8 });
+
   autoTable(doc, {
     startY: y,
+    ...daySalesUrduHooks,
     head: [["#", "Customer", "Product", "Qty", "Rate", "Bill (Rs.)", "Cash (Rs.)"]],
     body: salesRows.length ? salesRows : [["—", "No sales recorded today", "—", "—", "—", "—", "—"]],
     theme: "striped",

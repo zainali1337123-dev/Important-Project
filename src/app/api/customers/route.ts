@@ -46,26 +46,34 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseServerClient();
     const body = await request.json();
-    const { name, type, phone, opening_balance, advance_payment } = body;
+    const { name, type, phone, opening_balance, advance_payment, credit_limit } = body;
 
     if (!name?.trim()) {
       return NextResponse.json({ error: "Customer name is required" }, { status: 400 });
     }
 
-    const { data, error } = await supabase
+    const insertPayload: Record<string, any> = {
+      name: name.trim(),
+      type: type || "credit",
+      phone: phone ? String(phone).trim() : null,
+      opening_balance: Number(opening_balance) || 0,
+      advance_payment: Number(advance_payment) || 0,
+      credit_limit: credit_limit !== undefined && Number(credit_limit) >= 0 ? Number(credit_limit) : 3_000_000,
+      is_active: true,
+    };
+
+    let { data, error } = await supabase
       .from("customers")
-      .insert([
-        {
-          name: name.trim(),
-          type: type || "credit",
-          phone: phone ? String(phone).trim() : null,
-          opening_balance: Number(opening_balance) || 0,
-          advance_payment: Number(advance_payment) || 0,
-          is_active: true,
-        },
-      ])
+      .insert([insertPayload])
       .select()
       .single();
+
+    if (error && error.message?.includes("credit_limit")) {
+      delete insertPayload.credit_limit;
+      const fb = await supabase.from("customers").insert([insertPayload]).select().single();
+      data = fb.data;
+      error = fb.error;
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
@@ -81,7 +89,7 @@ export async function PUT(request: NextRequest) {
   try {
     const supabase = getSupabaseServerClient();
     const body = await request.json();
-    const { id, name, type, phone, opening_balance, advance_payment, is_active } = body;
+    const { id, name, type, phone, opening_balance, advance_payment, credit_limit, is_active } = body;
 
     if (!id) {
       return NextResponse.json({ error: "Customer ID is required" }, { status: 400 });
@@ -93,14 +101,22 @@ export async function PUT(request: NextRequest) {
     if (phone !== undefined) updateData.phone = phone ? String(phone).trim() : null;
     if (opening_balance !== undefined) updateData.opening_balance = Number(opening_balance);
     if (advance_payment !== undefined) updateData.advance_payment = Number(advance_payment);
+    if (credit_limit !== undefined) updateData.credit_limit = Number(credit_limit) >= 0 ? Number(credit_limit) : 3_000_000;
     if (is_active !== undefined) updateData.is_active = is_active;
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("customers")
       .update(updateData)
       .eq("id", id)
       .select()
       .single();
+
+    if (error && error.message?.includes("credit_limit")) {
+      delete updateData.credit_limit;
+      const fb = await supabase.from("customers").update(updateData).eq("id", id).select().single();
+      data = fb.data;
+      error = fb.error;
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
