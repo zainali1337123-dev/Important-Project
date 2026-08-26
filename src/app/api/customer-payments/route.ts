@@ -16,7 +16,10 @@ export async function GET(request: NextRequest) {
 
     let query = supabase
       .from("customer_payments")
-      .select("*, customers(*), locations(*)", { count: "exact" })
+      .select(
+        "id, customer_id, amount, date, payment_date, location, location_id, payment_method, notes, applied_to_opening, applied_to_advance, entered_by, created_at, customers(id, name, type, phone, opening_balance, advance_payment)",
+        { count: "exact" },
+      )
       .order("payment_date", { ascending: false })
       .order("created_at", { ascending: false })
       .order("id", { ascending: false });
@@ -140,25 +143,77 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { data, error } = await supabase
+    // 1. Primary insert attempt with full tracking columns
+    const insertPayload: Record<string, any> = {
+      customer_id: Number(customer_id),
+      amount: amt,
+      payment_date: effectiveDate,
+      date: effectiveDate,
+      location_id: locId,
+      location: locName,
+      payment_method: payMethod,
+      applied_to_opening: toOpening,
+      applied_to_advance: toAdvance,
+      notes: notes || null,
+      entered_by: userEntered,
+    };
+
+    let data: any = null;
+    let error: any = null;
+
+    const primaryRes = await supabase
       .from("customer_payments")
-      .insert([
-        {
+      .insert([insertPayload])
+      .select(
+        "id, customer_id, amount, date, payment_date, location, location_id, payment_method, notes, applied_to_opening, applied_to_advance, entered_by, created_at, customers(id, name, type, phone)",
+      )
+      .single();
+
+    data = primaryRes.data;
+    error = primaryRes.error;
+
+    // 2. Schema Fallback: If table in Supabase is missing newer columns (e.g. applied_to_opening/location_id), retry with plain columns
+    if (error) {
+      const fallbackPayload = {
+        customer_id: Number(customer_id),
+        amount: amt,
+        payment_date: effectiveDate,
+        date: effectiveDate,
+        location: locName,
+        payment_method: payMethod,
+        notes: notes || null,
+        entered_by: userEntered,
+      };
+
+      const fallbackRes = await supabase
+        .from("customer_payments")
+        .insert([fallbackPayload])
+        .select("id, customer_id, amount, date, payment_date, location, payment_method, notes, created_at, customers(id, name)")
+        .single();
+
+      if (fallbackRes.error) {
+        // Even simpler fallback without payment_date or entered_by if those are missing
+        const minimalPayload = {
           customer_id: Number(customer_id),
           amount: amt,
-          payment_date: effectiveDate,
           date: effectiveDate,
-          location_id: locId,
           location: locName,
           payment_method: payMethod,
-          applied_to_opening: toOpening,
-          applied_to_advance: toAdvance,
           notes: notes || null,
-          entered_by: userEntered,
-        },
-      ])
-      .select("*, customers(*), locations(*)")
-      .single();
+        };
+        const minimalRes = await supabase
+          .from("customer_payments")
+          .insert([minimalPayload])
+          .select("id, customer_id, amount, date, location, payment_method, notes, created_at, customers(id, name)")
+          .single();
+
+        data = minimalRes.data;
+        error = minimalRes.error;
+      } else {
+        data = fallbackRes.data;
+        error = fallbackRes.error;
+      }
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
