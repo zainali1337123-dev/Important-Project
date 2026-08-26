@@ -7,20 +7,22 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const date = searchParams.get("date") || searchParams.get("payment_date");
     const customerId = searchParams.get("customer_id");
+    const customerName = searchParams.get("customer_name") || searchParams.get("search");
     const locationId = searchParams.get("location_id");
     const from = searchParams.get("from");
     const to = searchParams.get("to");
     const page = searchParams.get("page");
-    const pageSize = searchParams.get("pageSize");
+    const pageSize = searchParams.get("pageSize") || searchParams.get("page_size");
 
     let query = supabase
       .from("customer_payments")
       .select("*, customers(*), locations(*)", { count: "exact" })
       .order("payment_date", { ascending: false })
+      .order("created_at", { ascending: false })
       .order("id", { ascending: false });
 
     if (date) {
-      query = query.eq("payment_date", date);
+      query = query.or(`payment_date.eq.${date},date.eq.${date}`);
     }
     if (from) {
       query = query.gte("payment_date", from);
@@ -31,26 +33,55 @@ export async function GET(request: NextRequest) {
     if (customerId) {
       query = query.eq("customer_id", customerId);
     }
-    if (locationId && locationId !== "all") {
+    if (locationId && locationId !== "all" && Number(locationId) > 0) {
       query = query.eq("location_id", locationId);
-    }
-
-    if (page && pageSize) {
-      const p = Number(page) || 1;
-      const ps = Number(pageSize) || 20;
-      const fromIdx = (p - 1) * ps;
-      const toIdx = fromIdx + ps - 1;
-      query = query.range(fromIdx, toIdx);
     }
 
     const { data, error, count } = await query;
     if (error) {
-      return NextResponse.json({ payments: [], total: 0, error: error.message }, { status: 200 });
+      return NextResponse.json(
+        { payments: [], rows: [], total: 0, totalPages: 1, error: error.message },
+        { status: 200 },
+      );
     }
 
-    return NextResponse.json({ payments: data || [], total: count || 0 });
+    let rows = data || [];
+
+    // Filter by customer name or phone or notes if provided
+    if (customerName && customerName.trim()) {
+      const q = customerName.trim().toLowerCase();
+      rows = rows.filter((r: any) => {
+        const cName = (r.customers?.name || "").toLowerCase();
+        const cPhone = (r.customers?.phone || "").toLowerCase();
+        const notes = (r.notes || "").toLowerCase();
+        return cName.includes(q) || cPhone.includes(q) || notes.includes(q);
+      });
+    }
+
+    const total = rows.length;
+    const p = Number(page) || 1;
+    const ps = Number(pageSize) || (page ? 20 : Math.max(total, 1));
+    const totalPages = Math.ceil(total / ps) || 1;
+
+    if (page && pageSize) {
+      const fromIdx = (p - 1) * ps;
+      const toIdx = fromIdx + ps;
+      rows = rows.slice(fromIdx, toIdx);
+    }
+
+    return NextResponse.json({
+      payments: rows,
+      rows: rows,
+      total,
+      totalPages,
+      page: p,
+      pageSize: ps,
+    });
   } catch (err: any) {
-    return NextResponse.json({ payments: [], total: 0, error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { payments: [], rows: [], total: 0, totalPages: 1, error: err.message },
+      { status: 500 },
+    );
   }
 }
 
@@ -65,9 +96,11 @@ export async function POST(request: NextRequest) {
       location_id,
       location,
       amount,
+      payment_method,
       notes,
       applied_to_opening,
       applied_to_advance,
+      entered_by,
     } = body;
 
     if (!customer_id || !amount) {
@@ -79,8 +112,33 @@ export async function POST(request: NextRequest) {
     if (!locId && location) {
       locId = location.toLowerCase().includes("farm") ? 1 : 2;
     }
-    const locName = locId === 1 ? "Farm" : "Shop";
+    const locName = location || (locId === 1 ? "Farm" : "Shop");
     const amt = Number(amount) || 0;
+    const payMethod = payment_method || "Cash";
+    const userEntered = entered_by || "Zain";
+
+    // 1. Fetch current customer data
+    const { data: customerData } = await supabase
+      .from("customers")
+      .select("id, name, opening_balance, advance_payment")
+      .eq("id", customer_id)
+      .single();
+
+    const currentOpening = Number(customerData?.opening_balance) || 0;
+    const currentAdvance = Number(customerData?.advance_payment) || 0;
+
+    let toOpening = applied_to_opening !== undefined ? Number(applied_to_opening) : 0;
+    let toAdvance = applied_to_advance !== undefined ? Number(applied_to_advance) : 0;
+
+    if (applied_to_opening === undefined && applied_to_advance === undefined) {
+      if (currentOpening > 0) {
+        toOpening = Math.min(amt, currentOpening);
+        toAdvance = Math.max(0, amt - currentOpening);
+      } else {
+        toOpening = 0;
+        toAdvance = amt;
+      }
+    }
 
     const { data, error } = await supabase
       .from("customer_payments")
@@ -92,13 +150,14 @@ export async function POST(request: NextRequest) {
           date: effectiveDate,
           location_id: locId,
           location: locName,
-          applied_to_opening: Number(applied_to_opening) || 0,
-          applied_to_advance: Number(applied_to_advance) || 0,
+          payment_method: payMethod,
+          applied_to_opening: toOpening,
+          applied_to_advance: toAdvance,
           notes: notes || null,
-          entered_by: "Zain",
+          entered_by: userEntered,
         },
       ])
-      .select()
+      .select("*, customers(*), locations(*)")
       .single();
 
     if (error) {
@@ -107,6 +166,7 @@ export async function POST(request: NextRequest) {
 
     // Insert Cash Ledger inflow
     if (amt > 0 && data) {
+      const custName = customerData?.name ? ` ${customerData.name}` : ` #${customer_id}`;
       await supabase.from("cash_ledger").insert([
         {
           entry_date: effectiveDate,
@@ -119,26 +179,26 @@ export async function POST(request: NextRequest) {
           amount: amt,
           source_type: "customer_payment",
           source_id: data.id,
-          description: `Customer payment received: ${notes || "Payment from customer #" + customer_id}`,
-          entered_by: "Zain",
+          description: `Customer payment received: ${notes || "Payment from" + custName}`,
+          entered_by: userEntered,
         },
       ]);
     }
 
-    // If applied_to_advance, increase customer's advance_payment
-    if (applied_to_advance && Number(applied_to_advance) > 0) {
-      const { data: cust } = await supabase
+    // If toAdvance > 0, update customer advance_payment
+    if (toAdvance > 0) {
+      await supabase
         .from("customers")
-        .select("advance_payment")
-        .eq("id", customer_id)
-        .single();
-      if (cust) {
-        const newAdv = (Number(cust.advance_payment) || 0) + Number(applied_to_advance);
-        await supabase.from("customers").update({ advance_payment: newAdv }).eq("id", customer_id);
-      }
+        .update({ advance_payment: currentAdvance + toAdvance })
+        .eq("id", customer_id);
     }
 
-    return NextResponse.json({ payment: data });
+    return NextResponse.json({
+      payment: data,
+      success: true,
+      applied_to_opening: toOpening,
+      applied_to_advance: toAdvance,
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

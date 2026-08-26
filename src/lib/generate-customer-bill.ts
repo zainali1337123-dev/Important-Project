@@ -22,6 +22,27 @@ export interface CustomerBillResult extends BillShareInfo {
 interface CustomerBillData {
   customer: Pick<Customer, "id" | "name" | "type" | "phone">;
   sales: Sale[];
+  payments?: Array<{
+    id?: number | string;
+    payment_date?: string;
+    date?: string;
+    amount?: number;
+    notes?: string | null;
+    payment_method?: string | null;
+    location?: string | null;
+    created_at?: string;
+  }>;
+  purchases?: Array<{
+    id?: number | string;
+    purchase_date?: string;
+    date?: string;
+    quantity?: number;
+    rate_per_bag?: number;
+    cash_paid?: number;
+    products?: { name?: string };
+    product_id?: number;
+    created_at?: string;
+  }>;
   openingBalance: number;
   totalBill: number;
   totalCashPaid: number;
@@ -135,6 +156,30 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
     }
   }
 
+  // Standalone payments
+  const standalonePayments = bill.payments || [];
+  const totalStandalonePayments = standalonePayments.reduce(
+    (sum, p) => sum + (Number(p.amount) || 0),
+    0,
+  );
+
+  // Goods value from purchases
+  const customerPurchases = bill.purchases || [];
+  const calculatedGoodsValue = customerPurchases.reduce(
+    (sum, pur) =>
+      sum +
+      Math.max(
+        0,
+        (Number(pur.quantity) || 0) * (Number(pur.rate_per_bag) || 0) -
+          (Number(pur.cash_paid) || 0),
+      ),
+    0,
+  );
+  const totalGoodsValue =
+    bill.totalGoodsValue !== undefined
+      ? bill.totalGoodsValue
+      : calculatedGoodsValue;
+
   // As Rate/Bag = Subtotal (excluding rents) / Total Bags
   const hasAsRatePerBag = actualTotalBags > 0 && actualSubtotal > 0;
   const asRatePerBag = hasAsRatePerBag ? actualSubtotal / actualTotalBags : 0;
@@ -142,10 +187,9 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
     ? `Rs. ${asRatePerBag.toLocaleString("en-PK", { maximumFractionDigits: 2 })}`
     : "";
 
-  const totalGoodsValue = bill.totalGoodsValue ?? 0;
   const advancePayment = bill.advancePayment ?? 0;
   const effectiveTotalBill = actualTotalBill;
-  const effectiveTotalCash = actualTotalCash;
+  const effectiveTotalCash = actualTotalCash + totalStandalonePayments;
   const effectiveBalanceDue =
     bill.openingBalance + effectiveTotalBill - effectiveTotalCash - totalGoodsValue - advancePayment;
 
@@ -280,7 +324,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   doc.setTextColor(...C_MUTED_GRAY);
   doc.text("Opening Bal:", rightX, y + 12);
   doc.text("Total Sales:", rightX, y + 18);
-  doc.text("Cash Paid:", rightX, y + 24);
+  doc.text("Total Paid/Rec:", rightX, y + 24);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
@@ -291,26 +335,137 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   doc.text(`Rs. ${effectiveTotalBill.toLocaleString("en-PK")}`, rightX + 28, y + 18);
   doc.text(`Rs. ${effectiveTotalCash.toLocaleString("en-PK")}`, rightX + 28, y + 24);
 
-  // Advance Payment row — shown only when customer has advance balance > 0
-  if (advancePayment > 0) {
+  let sumOffset = 0;
+  if (totalGoodsValue > 0) {
+    sumOffset += 6;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(...C_MUTED_GRAY);
-    doc.text("Advance Paid:", rightX, y + 30);
+    doc.text("Paid in Goods:", rightX, y + 24 + sumOffset);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(...C_DARK);
+    doc.text(`Rs. ${totalGoodsValue.toLocaleString("en-PK")}`, rightX + 28, y + 24 + sumOffset);
+  }
+
+  // Advance Payment row — shown only when customer has advance balance > 0
+  if (advancePayment > 0) {
+    sumOffset += 6;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...C_MUTED_GRAY);
+    doc.text("Advance Paid:", rightX, y + 24 + sumOffset);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
     doc.setTextColor(...C_GREEN);
-    doc.text(`Rs. ${(Number(advancePayment) || 0).toLocaleString("en-PK")}`, rightX + 28, y + 30);
+    doc.text(`Rs. ${(Number(advancePayment) || 0).toLocaleString("en-PK")}`, rightX + 28, y + 24 + sumOffset);
   }
 
-  y += advancePayment > 0 ? 36 : 30;
+  y += 30 + sumOffset;
 
   /* ════════════════════════════════════════════════════════
-   *  TRANSACTION TABLE
+   *  TRANSACTION TIMELINE & TABLE
    *  Row 1 (if opening balance > 0): highlighted "Opening Balance" row
-   *  Then sales rows indexed 1..N
+   *  Then chronological items (Sales, Standalone Payments, Goods Settled)
    * ════════════════════════════════════════════════════════ */
-  type TableRow = { data: string[]; opening?: boolean };
+  type TimelineItem =
+    | {
+        type: "mix_order";
+        date: string;
+        createdAt: string;
+        mixOrderId: number | string;
+        driverName: string | null;
+        driverRent: number;
+        billAmount: number;
+        cashReceived: number;
+      }
+    | {
+        type: "solo_sale";
+        date: string;
+        createdAt: string;
+        sale: Sale;
+      }
+    | {
+        type: "payment";
+        date: string;
+        createdAt: string;
+        payment: any;
+      }
+    | {
+        type: "purchase";
+        date: string;
+        createdAt: string;
+        purchase: any;
+      };
+
+  const timeline: TimelineItem[] = [];
+
+  const processedMixOrderIds = new Set<number | string>();
+  bill.sales.forEach((sale) => {
+    if (sale.mix_order_id) {
+      if (processedMixOrderIds.has(sale.mix_order_id)) return;
+      processedMixOrderIds.add(sale.mix_order_id);
+      const ingredients = bill.sales.filter((s) => s.mix_order_id === sale.mix_order_id);
+      const mixMetaEntry = bill.mixMeta?.[Number(sale.mix_order_id)];
+      const driverName = mixMetaEntry?.driver_name ?? sale.rickshaw_driver_name ?? null;
+      const driverRent = mixMetaEntry?.driver_rent ?? 0;
+      const ingredientsTotal = ingredients.reduce(
+        (sum, s) => sum + (Number(s.quantity) || 0) * (Number(s.rate_per_bag) || 0),
+        0,
+      );
+      const totalBillAmount = ingredientsTotal + driverRent;
+      const totalCashReceived = ingredients.reduce((sum, s) => sum + (Number(s.cash_received) || 0), 0);
+      timeline.push({
+        type: "mix_order",
+        date: sale.sale_date || "",
+        createdAt: sale.created_at || "",
+        mixOrderId: sale.mix_order_id,
+        driverName,
+        driverRent,
+        billAmount: totalBillAmount,
+        cashReceived: totalCashReceived,
+      });
+    } else {
+      timeline.push({
+        type: "solo_sale",
+        date: sale.sale_date || "",
+        createdAt: sale.created_at || "",
+        sale,
+      });
+    }
+  });
+
+  standalonePayments.forEach((p) => {
+    timeline.push({
+      type: "payment",
+      date: p.payment_date || p.date || "",
+      createdAt: p.created_at || "",
+      payment: p,
+    });
+  });
+
+  customerPurchases.forEach((pur) => {
+    timeline.push({
+      type: "purchase",
+      date: pur.purchase_date || pur.date || "",
+      createdAt: pur.created_at || "",
+      purchase: pur,
+    });
+  });
+
+  // Sort timeline chronologically
+  timeline.sort((a, b) => {
+    const dComp = (a.date || "").localeCompare(b.date || "");
+    if (dComp !== 0) return dComp;
+    return (a.createdAt || "").localeCompare(b.createdAt || "");
+  });
+
+  type TableRow = {
+    data: string[];
+    opening?: boolean;
+    isPayment?: boolean;
+    isPurchase?: boolean;
+  };
 
   const rows: TableRow[] = [];
 
@@ -320,7 +475,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
       opening: true,
       data: [
         "—",
-        bill.customer.name ? "" : "", // (no date for opening balance)
+        "Prev. Bal.",
         "Opening Balance (purana balance)",
         "—",
         "—",
@@ -332,78 +487,86 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   }
 
   let rowNum = 1;
-  // actualTotalBill / actualTotalCash are computed upfront at the top of
-  // this function so the summary box at the top of the bill can also use
-  // them. We don't accumulate again here.
-
-  bill.sales.forEach((sale, i) => {
-    // ─── Mix Order rows are collapsed into a single "Mix Order" row ───
-    // All ingredients share the same mix_order_id, sale_date, and cash_received.
-    // We aggregate the bill amount and rickshaw, and show "Mix Order" as the product.
-    if (sale.mix_order_id) {
-      // Skip if we've already processed this mix order (first ingredient emits the row)
-      // We detect this by checking if this is the first occurrence of this mix_order_id
-      const mixOrderId = sale.mix_order_id;
-      const firstOccurrenceIndex = bill.sales.findIndex((s) => s.mix_order_id === mixOrderId);
-      if (firstOccurrenceIndex !== i) return; // already emitted, skip
-
-      // Gather all ingredients of this mix order
-      const ingredients = bill.sales.filter((s) => s.mix_order_id === mixOrderId);
-      // Driver rent for mix orders is at the order level — look it up via mixMeta.
-      // Sale rows themselves have rickshaw_fare=0 for mix-order ingredients.
-      const mixMetaEntry = bill.mixMeta?.[Number(mixOrderId)];
-      const driverName = mixMetaEntry?.driver_name ?? sale.rickshaw_driver_name ?? null;
-      const driverRent = mixMetaEntry?.driver_rent ?? 0;
-      const ingredientsTotal = ingredients.reduce(
-        (sum, s) => sum + s.quantity * s.rate_per_bag,
-        0,
-      );
-      const totalBillAmount = ingredientsTotal + driverRent;
-      const totalCashReceived = ingredients.reduce((sum, s) => sum + s.cash_received, 0);
-
-      // Show driver name on a second line in the Product cell so the table
-      // layout doesn't break (autoTable handles \n as a line break).
-      const productCell = driverName
-        ? `Mix Order\n(Driver: ${driverName})`
+  timeline.forEach((item) => {
+    if (item.type === "mix_order") {
+      const productCell = item.driverName
+        ? `Mix Order\n(Driver: ${item.driverName})`
         : "Mix Order";
-
+      rows.push({
+        data: [
+          String(rowNum),
+          item.date || "",
+          productCell,
+          "—",
+          "—",
+          item.driverRent > 0 ? `Rs. ${item.driverRent.toLocaleString("en-PK")}` : "—",
+          `Rs. ${item.billAmount.toLocaleString("en-PK")}`,
+          item.cashReceived > 0 ? `Rs. ${item.cashReceived.toLocaleString("en-PK")}` : "—",
+        ],
+      });
+      rowNum++;
+    } else if (item.type === "solo_sale") {
+      const sale = item.sale;
+      const unitLabel = sale.unit_type === "kg" ? "kg" : "bags";
+      const billAmount = Number(sale.quantity) * Number(sale.rate_per_bag) + Number(sale.rickshaw_fare || 0);
+      const productName = sale.products?.name || `Product #${sale.product_id}`;
+      const productCell = sale.rickshaw_driver_name
+        ? `${productName}\n(Driver: ${sale.rickshaw_driver_name})`
+        : productName;
       rows.push({
         data: [
           String(rowNum),
           sale.sale_date || "",
           productCell,
-          "—", // qty varies per ingredient, not meaningful as a single value
-          "—", // rate varies per ingredient
-          driverRent > 0 ? `Rs. ${driverRent.toLocaleString("en-PK")}` : "—",
-          `Rs. ${totalBillAmount.toLocaleString("en-PK")}`,
-          totalCashReceived > 0 ? `Rs. ${totalCashReceived.toLocaleString("en-PK")}` : "—",
+          `${Number(sale.quantity).toLocaleString("en-PK")} ${unitLabel}`,
+          `Rs. ${Number(sale.rate_per_bag).toLocaleString("en-PK")}`,
+          Number(sale.rickshaw_fare) > 0 ? `Rs. ${Number(sale.rickshaw_fare).toLocaleString("en-PK")}` : "—",
+          `Rs. ${billAmount.toLocaleString("en-PK")}`,
+          Number(sale.cash_received) > 0 ? `Rs. ${Number(sale.cash_received).toLocaleString("en-PK")}` : "—",
         ],
       });
       rowNum++;
-      return;
+    } else if (item.type === "payment") {
+      const p = item.payment;
+      const desc = p.notes
+        ? `Cash Payment / Recovery\n(${p.notes})`
+        : "Cash Payment / Recovery";
+      rows.push({
+        isPayment: true,
+        data: [
+          String(rowNum),
+          item.date || "",
+          desc,
+          "—",
+          "—",
+          "—",
+          "—",
+          `Rs. ${Number(p.amount).toLocaleString("en-PK")}`,
+        ],
+      });
+      rowNum++;
+    } else if (item.type === "purchase") {
+      const pur = item.purchase;
+      const prodName = pur.products?.name || `Product #${pur.product_id}`;
+      const debtRed = Math.max(
+        0,
+        Number(pur.quantity) * Number(pur.rate_per_bag) - Number(pur.cash_paid || 0),
+      );
+      rows.push({
+        isPurchase: true,
+        data: [
+          String(rowNum),
+          item.date || "",
+          `Paid in Goods: ${prodName}`,
+          `${Number(pur.quantity).toLocaleString("en-PK")} bags`,
+          `Rs. ${Number(pur.rate_per_bag).toLocaleString("en-PK")}`,
+          "—",
+          "—",
+          `Rs. ${debtRed.toLocaleString("en-PK")}`,
+        ],
+      });
+      rowNum++;
     }
-
-    // ─── Solo sale — render normally ───
-    const unitLabel = sale.unit_type === "kg" ? "kg" : "bags";
-    const billAmount = sale.quantity * sale.rate_per_bag + sale.rickshaw_fare;
-    // Show driver name on a second line in the Product cell (if present)
-    const productName = sale.products?.name || `Product #${sale.product_id}`;
-    const productCell = sale.rickshaw_driver_name
-      ? `${productName}\n(Driver: ${sale.rickshaw_driver_name})`
-      : productName;
-    rows.push({
-      data: [
-        String(rowNum),
-        sale.sale_date || "",
-        productCell,
-        `${sale.quantity.toLocaleString("en-PK")} ${unitLabel}`,
-        `Rs. ${sale.rate_per_bag.toLocaleString("en-PK")}`,
-        sale.rickshaw_fare > 0 ? `Rs. ${sale.rickshaw_fare.toLocaleString("en-PK")}` : "—",
-        `Rs. ${billAmount.toLocaleString("en-PK")}`,
-        sale.cash_received > 0 ? `Rs. ${sale.cash_received.toLocaleString("en-PK")}` : "—",
-      ],
-    });
-    rowNum++;
   });
 
   // The opening-balance row spans the date column visually using empty string,
@@ -416,6 +579,12 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   const tData = rows.map((r) => r.data);
   const openingRowIndices = rows
     .map((r, i) => (r.opening ? i : -1))
+    .filter((i) => i >= 0);
+  const paymentRowIndices = rows
+    .map((r, i) => (r.isPayment ? i : -1))
+    .filter((i) => i >= 0);
+  const purchaseRowIndices = rows
+    .map((r, i) => (r.isPurchase ? i : -1))
     .filter((i) => i >= 0);
 
   // ── Pre-render Product column cells that contain Urdu text ──
@@ -489,7 +658,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
       lineColor: C_GRAY_LIGHT,
       cellPadding: 2.5,
     },
-    // Highlight the opening-balance row(s) in amber + clear Urdu cell text
+    // Highlight the opening-balance row(s) in amber, payments in emerald, goods in purple
     didParseCell: (hookData) => {
       if (
         hookData.section === "body" &&
@@ -498,6 +667,19 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
         hookData.cell.styles.fillColor = C_GOLD_LIGHT;
         hookData.cell.styles.textColor = C_GREEN;
         hookData.cell.styles.fontStyle = "bold";
+      } else if (
+        hookData.section === "body" &&
+        paymentRowIndices.includes(hookData.row.index)
+      ) {
+        hookData.cell.styles.fillColor = [236, 253, 245];
+        hookData.cell.styles.textColor = [6, 95, 70];
+        hookData.cell.styles.fontStyle = "bold";
+      } else if (
+        hookData.section === "body" &&
+        purchaseRowIndices.includes(hookData.row.index)
+      ) {
+        hookData.cell.styles.fillColor = [245, 243, 255];
+        hookData.cell.styles.textColor = [107, 33, 168];
       }
       // For Product column cells with Urdu text, replace text with spaces
       // (preserves line count → row height stays correct) — the actual
@@ -606,15 +788,27 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
     doc.text(asRatePerBagStr, valX, ty, { align: "right" });
   }
 
-  // Cash Paid
+  // Cash Paid / Recoveries
   ty += 6.5;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(...C_MUTED_GRAY);
-  doc.text("Cash Paid:", labelX, ty);
+  doc.text("Cash Paid / Rec:", labelX, ty);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...C_DARK);
   doc.text(totalCashStr, valX, ty, { align: "right" });
+
+  // Paid in Goods (only when > 0)
+  if (totalGoodsValue > 0) {
+    ty += 6.5;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(...C_MUTED_GRAY);
+    doc.text("Paid in Goods:", labelX, ty);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...C_DARK);
+    doc.text(`Rs. ${(Number(totalGoodsValue) || 0).toLocaleString("en-PK")}`, valX, ty, { align: "right" });
+  }
 
   // Advance Payment (only when > 0)
   if (hasAdvance) {
@@ -658,7 +852,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(...C_DARK);
-  const wordsText = numberToRupeeWords(bill.balanceDue);
+  const wordsText = numberToRupeeWords(effectiveBalanceDue);
   const wordsLines = doc.splitTextToSize(wordsText, tBoxX - m - 6);
   doc.text(wordsLines, m, fy + 11);
 

@@ -27,6 +27,7 @@ export const queryKeys = {
   mixOrders: ["mix-orders"] as const,
   mixOrdersPaginated: (filters: Record<string, string>, page: number, pageSize: number) =>
     ["mix-orders", "paged", filters, page, pageSize] as const,
+  customerPayments: (filters: Record<string, unknown>) => ["customer-payments", filters] as const,
   labours: (activeOnly: boolean) => ["labours", activeOnly] as const,
   labourPayments: (filters: Record<string, unknown>) => ["labour-payments", filters] as const,
 };
@@ -271,6 +272,15 @@ export function useInvalidateAfterMutation() {
     invalidateMixOrders: () => qc.invalidateQueries({ queryKey: ["mix-orders"] }),
     invalidateLabours: () => qc.invalidateQueries({ queryKey: ["labours"] }),
     invalidateLabourPayments: () => qc.invalidateQueries({ queryKey: ["labour-payments"] }),
+    invalidateCustomerPayments: () => qc.invalidateQueries({ queryKey: ["customer-payments"] }),
+    invalidateAfterCustomerPaymentMutation: () => {
+      qc.invalidateQueries({ queryKey: ["customer-payments"] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      qc.invalidateQueries({ queryKey: ["customer-balance"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["reconciliation"] });
+      qc.invalidateQueries({ queryKey: ["cash-balances"] });
+    },
     invalidateAfterSaleMutation: () => {
       qc.invalidateQueries({ queryKey: ["sales"] });
       qc.invalidateQueries({ queryKey: ["customer-balance"] });
@@ -301,3 +311,13 @@ export function useInvalidateAfterMutation() {
     },
   };
 }
+
+export function invalidateAfterCustomerPaymentMutation(qc: any) {
+  qc.invalidateQueries({ queryKey: ["customer-payments"] });
+  qc.invalidateQueries({ queryKey: ["customers"] });
+  qc.invalidateQueries({ queryKey: ["customer-balance"] });
+  qc.invalidateQueries({ queryKey: ["dashboard"] });
+  qc.invalidateQueries({ queryKey: ["reconciliation"] });
+  qc.invalidateQueries({ queryKey: ["cash-balances"] });
+}
+

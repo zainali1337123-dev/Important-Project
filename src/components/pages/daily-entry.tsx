@@ -68,6 +68,8 @@ import { AvailableStock } from "@/components/shared/available-stock";
 import { pktToday } from "@/lib/pkt-date";
 import { downloadExcel } from "@/lib/download-excel";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useQueryClient } from "@tanstack/react-query";
+import { invalidateAfterCustomerPaymentMutation } from "@/hooks/queries";
 import {
   Dialog,
   DialogContent,
@@ -81,6 +83,7 @@ const fmt = (n?: number | null) => (n === null || n === undefined || isNaN(Numbe
 
 export default function DailyEntryPage() {
   const today = pktToday();
+  const queryClient = useQueryClient();
 
   const { items: cartItems, addItem, removeItem, clearCart, getTotal: getCartTotal } = useCartStore();
 
@@ -292,18 +295,22 @@ export default function DailyEntryPage() {
   // when only the payments list needs to refresh (e.g. after adding a payment).
   const loadCustomerPayments = useCallback(async (d: string, customerName = "", page = 1) => {
     try {
-      const params = new URLSearchParams({ payment_date: d });
+      const params = new URLSearchParams({ payment_date: d, date: d });
       if (customerName.trim()) params.set("customer_name", customerName.trim());
       params.set("page", String(page));
       params.set("pageSize", String(CP_PAGE_SIZE));
       const res = await fetch(`/api/customer-payments?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
-        setCustomerPayments(data.rows ?? []);
-        setCpTotal(data.total ?? 0);
-        setCpTotalPages(data.totalPages ?? 1);
+        const list = Array.isArray(data.rows)
+          ? data.rows
+          : Array.isArray(data.payments)
+          ? data.payments
+          : [];
+        setCustomerPayments(list);
+        setCpTotal(typeof data.total === "number" ? data.total : list.length);
+        setCpTotalPages(typeof data.totalPages === "number" ? data.totalPages : 1);
       } else {
-        // Silent fail — table not deployed yet (migration not run).
         // Show empty list so UI doesn't crash.
         setCustomerPayments([]);
         setCpTotal(0);
@@ -915,6 +922,10 @@ export default function DailyEntryPage() {
           customer_id: Number(cpCustomerId),
           amount: amt,
           payment_date: date,
+          date: date,
+          location_id: salesLocationFilter > 0 ? salesLocationFilter : 2,
+          location: salesLocationFilter === 1 ? "Farm" : "Shop",
+          payment_method: "Cash",
           notes: cpNotes.trim() || null,
         }),
       });
@@ -923,7 +934,7 @@ export default function DailyEntryPage() {
         throw new Error(err.detail || err.error || "Failed to save payment");
       }
       const data = await res.json().catch(() => ({}));
-      const newId = data?.id;
+      const newId = data?.payment?.id || data?.id;
 
       // Clear the form
       setCpCustomerId("");
@@ -933,10 +944,12 @@ export default function DailyEntryPage() {
 
       // Refresh customers list (advance_payment / opening_balance changed)
       // + customer payments history + master data
+      setCpPage(1);
       invalidateCache("customers");
+      invalidateAfterCustomerPaymentMutation(queryClient);
       await Promise.all([
         loadMasterData(),
-        loadCustomerPayments(date, cpSearchDebounced, cpPage),
+        loadCustomerPayments(date, "", 1),
       ]);
 
       // Compose a helpful toast — tell the user how the payment was split

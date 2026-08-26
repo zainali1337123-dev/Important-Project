@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL
 );
 
--- 12. Customer Payments Table
+-- 12. Customer Payments Table (Standalone Cash Recoveries / Advances)
 CREATE TABLE IF NOT EXISTS customer_payments (
   id BIGSERIAL PRIMARY KEY,
   payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS customer_payments (
   customer_id BIGINT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
   location_id BIGINT NOT NULL DEFAULT 2 REFERENCES locations(id) ON DELETE RESTRICT,
   location TEXT NOT NULL DEFAULT 'Shop',
+  payment_method TEXT NOT NULL DEFAULT 'Cash',
   amount NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
   applied_to_opening NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
   applied_to_advance NUMERIC(14, 2) NOT NULL DEFAULT 0.00,

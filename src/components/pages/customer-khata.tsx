@@ -18,6 +18,7 @@ import {
   Search,
   Truck,
   ShoppingBag,
+  Wallet,
 } from "lucide-react";
 import {
   Select,
@@ -139,8 +140,10 @@ export default function CustomerKhataPage() {
   // ── Buy-Product records (goods we bought FROM this customer) ──
   // Fetched unpaginated — the per-customer list is usually short.
   const [selectedPurchases, setSelectedPurchases] = useState<Purchase[]>([]);
+  const [selectedPayments, setSelectedPayments] = useState<any[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [loadingPurchases, setLoadingPurchases] = useState(false);
+  const [loadingPayments, setLoadingPayments] = useState(false);
 
   // Load locations (Farmhouse / Shop) once for the purchases table display
   useEffect(() => {
@@ -155,20 +158,28 @@ export default function CustomerKhataPage() {
     })();
   }, []);
 
-  // Fetch purchases-from-customer whenever the selected customer changes
+  // Fetch purchases-from-customer and standalone customer payments whenever the selected customer changes
   useEffect(() => {
     if (!selectedCustomerId) {
       setSelectedPurchases([]);
+      setSelectedPayments([]);
       return;
     }
     let cancelled = false;
     (async () => {
       setLoadingPurchases(true);
+      setLoadingPayments(true);
       try {
-        const purRaw = await fetch(
-          `/api/purchases?from_customers_only=true&customer_id=${selectedCustomerId}&page=1&page_size=10000`,
-          { cache: "no-store" },
-        );
+        const [purRaw, payRaw] = await Promise.all([
+          fetch(
+            `/api/purchases?from_customers_only=true&customer_id=${selectedCustomerId}&page=1&page_size=10000`,
+            { cache: "no-store" },
+          ),
+          fetch(
+            `/api/customer-payments?customer_id=${selectedCustomerId}&pageSize=10000`,
+            { cache: "no-store" },
+          ),
+        ]);
         if (cancelled) return;
         if (purRaw.ok) {
           const purRes = await purRaw.json();
@@ -176,10 +187,22 @@ export default function CustomerKhataPage() {
         } else {
           setSelectedPurchases([]);
         }
+        if (payRaw.ok) {
+          const payRes = await payRaw.json();
+          setSelectedPayments(payRes.payments ?? payRes.rows ?? []);
+        } else {
+          setSelectedPayments([]);
+        }
       } catch {
-        if (!cancelled) setSelectedPurchases([]);
+        if (!cancelled) {
+          setSelectedPurchases([]);
+          setSelectedPayments([]);
+        }
       } finally {
-        if (!cancelled) setLoadingPurchases(false);
+        if (!cancelled) {
+          setLoadingPurchases(false);
+          setLoadingPayments(false);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -289,16 +312,18 @@ export default function CustomerKhataPage() {
     }
     setDownloadingBill(true);
     try {
-      // Fetch ALL sales for the bill (not just current page) — bill should be complete
-      const allSalesRes = await fetch(`/api/sales?customer_id=${selectedCustomerId}`);
-      if (!allSalesRes.ok) { toast.error("Failed to fetch sales for bill"); return; }
-      const allSalesJson = await allSalesRes.json();
+      // Fetch ALL sales and payments for the bill (not just current page) — bill should be complete
+      const [allSalesRes, allPaymentsRes] = await Promise.all([
+        fetch(`/api/sales?customer_id=${selectedCustomerId}&page_size=10000`),
+        fetch(`/api/customer-payments?customer_id=${selectedCustomerId}&pageSize=10000`),
+      ]);
+
+      const allSalesJson = allSalesRes.ok ? await allSalesRes.json() : { sales: [] };
       const allSales: Sale[] = allSalesJson.sales ?? [];
-      if (allSales.length === 0) {
-        toast.error("No sales data to generate bill");
-        return;
-      }
-      const { generateCustomerBillPDF } = await import("@/lib/generate-customer-bill");
+
+      const allPaymentsJson = allPaymentsRes.ok ? await allPaymentsRes.json() : { payments: [] };
+      const allPayments = allPaymentsJson.payments ?? allPaymentsJson.rows ?? [];
+
       const bal = selectedBalance ?? {
         opening_balance: selectedCustomer?.opening_balance ?? 0,
         total_bill: 0,
@@ -307,9 +332,23 @@ export default function CustomerKhataPage() {
         advance_payment: selectedCustomer?.advance_payment ?? 0,
         balance_due: (selectedCustomer?.opening_balance ?? 0) - (selectedCustomer?.advance_payment ?? 0),
       };
+
+      if (
+        allSales.length === 0 &&
+        allPayments.length === 0 &&
+        selectedPurchases.length === 0 &&
+        Number(bal.opening_balance || 0) === 0
+      ) {
+        toast.error("No transaction data to generate bill");
+        return;
+      }
+
+      const { generateCustomerBillPDF } = await import("@/lib/generate-customer-bill");
       const billResult = await generateCustomerBillPDF({
         customer: selectedCustomer,
         sales: allSales,
+        payments: allPayments,
+        purchases: selectedPurchases,
         openingBalance: bal.opening_balance,
         totalBill: bal.total_bill,
         totalCashPaid: bal.total_cash_paid,
@@ -1128,6 +1167,95 @@ export default function CustomerKhataPage() {
               )}
             </div>
 
+            {/* Standalone Customer Payments / Recoveries */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <Wallet className="size-3.5 text-emerald-600" />
+                  Customer Payments / Recoveries (Cash & Online)
+                </h3>
+                <span className="text-xs text-slate-500">
+                  Total Payments:{" "}
+                  <span className="font-bold text-emerald-700">
+                    Rs. {fmt(selectedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0))}
+                  </span>
+                </span>
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-slate-100">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-emerald-50 border-b border-emerald-200">
+                      <th className="text-left text-xs uppercase text-emerald-800 font-semibold px-3 py-2.5">#</th>
+                      <th className="text-left text-xs uppercase text-emerald-800 font-semibold px-3 py-2.5">Date</th>
+                      <th className="text-right text-xs uppercase text-emerald-800 font-semibold px-3 py-2.5">Amount (Rs.)</th>
+                      <th className="text-center text-xs uppercase text-emerald-800 font-semibold px-3 py-2.5">Payment Method</th>
+                      <th className="text-center text-xs uppercase text-emerald-800 font-semibold px-3 py-2.5">Location</th>
+                      <th className="text-left text-xs uppercase text-emerald-800 font-semibold px-3 py-2.5">Notes / Reference</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loadingPayments ? (
+                      <tr>
+                        <td colSpan={6} className="px-3 py-8 text-center">
+                          <Loader2 className="size-5 animate-spin text-slate-400 mx-auto" />
+                        </td>
+                      </tr>
+                    ) : selectedPayments.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-3 py-8 text-center text-slate-400 text-sm">
+                          No direct customer payments recorded yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      selectedPayments.map((p, idx) => {
+                        const locName = p.locations?.name || (locations.find((l) => l.id === p.location_id)?.name) || p.location || "—";
+                        const pDate = p.payment_date || p.date || (p.created_at ? p.created_at.split("T")[0] : "—");
+                        const amt = Number(p.amount) || 0;
+                        return (
+                          <tr key={p.id || idx} className="border-b border-slate-50 last:border-b-0 hover:bg-emerald-50/40">
+                            <td className="px-3 py-2.5 text-slate-500 font-medium">{idx + 1}</td>
+                            <td className="px-3 py-2.5 text-slate-600">{pDate}</td>
+                            <td className="px-3 py-2.5 text-right">
+                              <AmountWithWords amount={amt} className="items-end text-emerald-700 font-bold" />
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs">
+                                {p.payment_method || "Cash"}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-2.5 text-center text-xs text-slate-600">{locName}</td>
+                            <td className="px-3 py-2.5 text-slate-700 text-xs">
+                              {p.notes || <span className="text-slate-300">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                  {selectedPayments.length > 0 && (
+                    <tfoot>
+                      <tr className="bg-emerald-50/80 border-t-2 border-emerald-200">
+                        <td colSpan={2} className="px-3 py-3 text-right text-xs uppercase font-bold text-emerald-800">
+                          Total Payments Received
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <span className="inline-flex flex-col items-end">
+                            <span className="tabular-nums font-extrabold text-emerald-900">
+                              Rs. {fmt(selectedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0))}
+                            </span>
+                            <span className="text-[0.6rem] text-emerald-700 capitalize">
+                              {numberToWords(selectedPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0))}
+                            </span>
+                          </span>
+                        </td>
+                        <td colSpan={3}></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+
             {/* Bought From Customer — individual purchase records (goods we bought FROM this customer) */}
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -1226,11 +1354,17 @@ export default function CustomerKhataPage() {
 
             {/* Metric Cards */}
             {selectedBalance && (
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className={cn(
+                "grid grid-cols-2 gap-4",
+                (Number(selectedBalance.advance_payment) > 0) ? "lg:grid-cols-6" : "lg:grid-cols-5"
+              )}>
                 <MetricCard label="Opening Balance" value={fmt(selectedBalance.opening_balance)} color="amber" prefix="Rs. " words={numberToWords(selectedBalance.opening_balance)} />
                 <MetricCard label="Total Billed" value={fmt(selectedBalance.total_bill)} color="blue" prefix="Rs. " words={numberToWords(selectedBalance.total_bill)} />
                 <MetricCard label="Cash Paid" value={fmt(selectedBalance.total_cash_paid)} color="green" prefix="Rs. " words={numberToWords(selectedBalance.total_cash_paid)} />
                 <MetricCard label="Paid in Goods" value={fmt(selectedBalance.total_goods_value)} color="purple" prefix="Rs. " words={numberToWords(selectedBalance.total_goods_value)} />
+                {Number(selectedBalance.advance_payment) > 0 && (
+                  <MetricCard label="Advance Payment" value={fmt(selectedBalance.advance_payment)} color="green" prefix="Rs. " words={numberToWords(Number(selectedBalance.advance_payment) || 0)} />
+                )}
                 <MetricCard label="Balance Due" value={fmt(selectedBalance.balance_due)} color="orange" prefix="Rs. " words={numberToWords(selectedBalance.balance_due)} />
               </div>
             )}
