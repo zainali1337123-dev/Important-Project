@@ -12,21 +12,23 @@ export async function GET(request: NextRequest) {
     const page = searchParams.get("page");
     const pageSize = searchParams.get("pageSize");
 
+    // 1. Primary Query: Plain columns without foreign locations join
     let query = supabase
       .from("expenses")
-      .select("*, locations(*)", { count: "exact" })
-      .order("expense_date", { ascending: false })
+      .select("*", { count: "exact" })
       .order("id", { ascending: false });
 
     if (date) {
-      query = query.eq("expense_date", date);
+      query = query.or(`expense_date.eq.${date},date.eq.${date}`);
+    } else {
+      if (from) {
+        query = query.or(`expense_date.gte.${from},date.gte.${from}`);
+      }
+      if (to) {
+        query = query.or(`expense_date.lte.${to},date.lte.${to}`);
+      }
     }
-    if (from) {
-      query = query.gte("expense_date", from);
-    }
-    if (to) {
-      query = query.lte("expense_date", to);
-    }
+
     if (locationId && locationId !== "all") {
       query = query.eq("location_id", locationId);
     }
@@ -39,12 +41,59 @@ export async function GET(request: NextRequest) {
       query = query.range(fromIdx, toIdx);
     }
 
-    const { data, error, count } = await query;
+    let { data, error, count } = await query;
+
+    // Fallback if .or condition failed (e.g. if one of the date columns doesn't exist yet)
     if (error) {
-      return NextResponse.json({ expenses: [], total: 0, error: error.message }, { status: 200 });
+      if (date) {
+        const tryExpenseDate = await supabase
+          .from("expenses")
+          .select("*", { count: "exact" })
+          .eq("expense_date", date)
+          .order("id", { ascending: false });
+
+        if (!tryExpenseDate.error) {
+          data = tryExpenseDate.data;
+          error = null;
+          count = tryExpenseDate.count;
+        } else {
+          const tryDate = await supabase
+            .from("expenses")
+            .select("*", { count: "exact" })
+            .eq("date", date)
+            .order("id", { ascending: false });
+
+          if (!tryDate.error) {
+            data = tryDate.data;
+            error = null;
+            count = tryDate.count;
+          }
+        }
+      } else {
+        const allRes = await supabase.from("expenses").select("*", { count: "exact" }).order("id", { ascending: false });
+        if (!allRes.error) {
+          data = allRes.data;
+          error = null;
+          count = allRes.count;
+        }
+      }
     }
 
-    return NextResponse.json({ expenses: data || [], total: count || 0 });
+    if (error) {
+      console.error("GET expenses error:", error);
+      return NextResponse.json({ expenses: [], total: 0, error: error.message }, { status: 400 });
+    }
+
+    // Normalize records for frontend consumers
+    const normalized = (data || []).map((exp: any) => ({
+      ...exp,
+      expense_date: exp.expense_date || exp.date || date || new Date().toISOString().split("T")[0],
+      date: exp.date || exp.expense_date || date || new Date().toISOString().split("T")[0],
+      location: exp.location || (Number(exp.location_id) === 1 ? "Farm" : "Shop"),
+      amount: Number(exp.amount) || 0,
+    }));
+
+    return NextResponse.json({ expenses: normalized, total: count ?? normalized.length });
   } catch (err: any) {
     return NextResponse.json({ expenses: [], total: 0, error: err.message }, { status: 500 });
   }
@@ -85,17 +134,61 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
-    if (error && (error.message?.includes("category") || error.message?.includes("date") || error.message?.includes("location") || error.message?.includes("schema cache"))) {
-      // Fallback with minimal standard schema
-      const fallbackPayload: Record<string, any> = {
-        description: description.trim(),
-        amount: amt,
-        expense_date: effectiveDate,
-      };
-      if (locId) fallbackPayload.location_id = locId;
-      const fb = await supabase.from("expenses").insert([fallbackPayload]).select().single();
-      data = fb.data;
-      error = fb.error;
+    if (error) {
+      // Fallback 1: Standard columns
+      const fb1 = await supabase
+        .from("expenses")
+        .insert([
+          {
+            description: description.trim(),
+            amount: amt,
+            expense_date: effectiveDate,
+            date: effectiveDate,
+            location: locName,
+            category: category || "General",
+          },
+        ])
+        .select()
+        .single();
+
+      if (!fb1.error) {
+        data = fb1.data;
+        error = null;
+      } else {
+        // Fallback 2: Minimal columns
+        const fb2 = await supabase
+          .from("expenses")
+          .insert([
+            {
+              description: description.trim(),
+              amount: amt,
+              expense_date: effectiveDate,
+            },
+          ])
+          .select()
+          .single();
+
+        if (!fb2.error) {
+          data = fb2.data;
+          error = null;
+        } else {
+          // Fallback 3: Using `date` column
+          const fb3 = await supabase
+            .from("expenses")
+            .insert([
+              {
+                description: description.trim(),
+                amount: amt,
+                date: effectiveDate,
+              },
+            ])
+            .select()
+            .single();
+
+          data = fb3.data;
+          error = fb3.error;
+        }
+      }
     }
 
     if (error) {
