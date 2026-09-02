@@ -38,7 +38,7 @@ import ConfirmAction from "@/components/shared/confirm-action";
 import {
   UserPlus, Users, Download, Loader2, Pencil, Ban, RotateCcw,
   Trash2, Search, Phone, UserCheck, Phone as PhoneIcon,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Save,
 } from "lucide-react";
 import { useCustomersPaginated, useCustomerBalance, useInvalidateAfterMutation } from "@/hooks/queries";
 import { downloadAllJson } from "@/lib/download-json";
@@ -608,18 +608,24 @@ export default function ManageCustomersPage() {
 
       {/* ─── Add Dialog ─── */}
       <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (!o) setAddForm(emptyForm); }}>
-        <DialogContent className="sm:max-w-md bg-white">
-          <DialogHeader>
-            <DialogTitle>Register New Customer</DialogTitle>
-            <DialogDescription>
-              Naya customer add karein. Type aur opening balance baad me edit kar sakte hain.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-xl md:max-w-2xl bg-white max-h-[88vh] flex flex-col p-0 overflow-hidden shadow-2xl">
+          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/60 shrink-0">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-lg text-slate-900">
+                <UserPlus className="size-5 text-emerald-600" />
+                Register New Customer
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500">
+                Naya customer add karein. Type aur opening balance baad me edit kar sakte hain.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
           <CustomerFormFields
             form={addForm}
             setForm={setAddForm}
             submitting={submitting}
             onSubmit={handleAdd}
+            onCancel={() => { setAddOpen(false); setAddForm(emptyForm); }}
             submitLabel="Add Customer"
           />
         </DialogContent>
@@ -627,18 +633,24 @@ export default function ManageCustomersPage() {
 
       {/* ─── Edit Dialog ─── */}
       <Dialog open={!!editCustomer} onOpenChange={(o) => { if (!o) setEditCustomer(null); }}>
-        <DialogContent className="sm:max-w-md bg-white">
-          <DialogHeader>
-            <DialogTitle>Edit Customer — {editCustomer?.name}</DialogTitle>
-            <DialogDescription>
-              Customer details edit karein. Sirf changed fields update honge.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-xl md:max-w-2xl bg-white max-h-[88vh] flex flex-col p-0 overflow-hidden shadow-2xl">
+          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/60 shrink-0">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-lg text-slate-900">
+                <Pencil className="size-5 text-blue-600" />
+                Edit Customer — {editCustomer?.name}
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500">
+                Customer details edit karein. Sirf changed fields update honge.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
           <CustomerFormFields
             form={editForm}
             setForm={setEditForm}
             submitting={submitting}
             onSubmit={handleEditSave}
+            onCancel={() => setEditCustomer(null)}
             submitLabel="Save Changes"
             showActiveToggle
           />
@@ -853,6 +865,7 @@ function CustomerFormFields({
   setForm,
   submitting,
   onSubmit,
+  onCancel,
   submitLabel,
   showActiveToggle = false,
 }: {
@@ -860,121 +873,154 @@ function CustomerFormFields({
   setForm: (f: CustomerForm) => void;
   submitting: boolean;
   onSubmit: () => void;
+  onCancel?: () => void;
   submitLabel: string;
   showActiveToggle?: boolean;
 }) {
   return (
-    <div className="space-y-4 pt-2">
-      <div className="space-y-2">
-        <Label>Full Name *</Label>
-        <Input
-          placeholder="Customer name"
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label className="flex items-center gap-1.5">
-          <Phone className="size-3.5" /> Phone (optional)
-        </Label>
-        <Input
-          placeholder="03XX-XXXXXXX"
-          value={form.phone}
-          onChange={(e) => setForm({ ...form, phone: e.target.value })}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label>Customer Type</Label>
-        <RadioGroup
-          value={form.type}
-          onValueChange={(v) => setForm({ ...form, type: v as "credit" | "cash" })}
-          className="flex gap-4"
-        >
-          <div className="flex items-center gap-2">
-            <RadioGroupItem value="credit" id="ctype-credit" />
-            <Label htmlFor="ctype-credit" className="font-normal cursor-pointer">
-              Credit (ادھار کھاتہ)
-            </Label>
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Scrollable form body */}
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 text-slate-800">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-700">Full Name *</Label>
+            <Input
+              placeholder="Customer name"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="h-10"
+            />
           </div>
-          <div className="flex items-center gap-2">
-            <RadioGroupItem value="cash" id="ctype-cash" />
-            <Label htmlFor="ctype-cash" className="font-normal cursor-pointer">
-              Cash (نقد)
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+              <Phone className="size-3.5 text-slate-500" /> Phone (optional)
             </Label>
+            <Input
+              placeholder="03XX-XXXXXXX"
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              className="h-10"
+            />
           </div>
-        </RadioGroup>
-      </div>
-
-      <div className="space-y-2">
-        <Label>Opening Balance (Rs.) — purana balance</Label>
-        <Input
-          type="number"
-          min="0"
-          step="100"
-          placeholder="0"
-          value={form.opening_balance}
-          onChange={(e) => setForm({ ...form, opening_balance: e.target.value })}
-        />
-        <p className="text-[11px] text-slate-500 leading-tight">
-          Agar customer ka koi purana balance hai jo aap ko pata hai (system se pehle ke sales),
-          wo yahan likh dein. Customer ki Khata me <strong>opening balance</strong> ke roop me
-          save hoga.
-        </p>
-        {parseFloat(form.opening_balance) > 0 && (
-          <p className="text-[0.65rem] text-slate-400 capitalize">
-            {numberToWords(parseFloat(form.opening_balance) || 0)}
-          </p>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <Label>Credit Limit (Rs.) — Default 30 Lac (3,000,000)</Label>
-        <Input
-          type="number"
-          min="0"
-          step="100000"
-          placeholder="3000000"
-          value={form.credit_limit}
-          onChange={(e) => setForm({ ...form, credit_limit: e.target.value })}
-        />
-        <p className="text-[11px] text-slate-500 leading-tight">
-          Jab balance is limit se exceed hoga, dashboard par <strong>Over Credit Limit</strong> card alert karega.
-        </p>
-        {parseFloat(form.credit_limit) > 0 && (
-          <p className="text-[0.65rem] text-slate-400 capitalize">
-            {numberToWords(parseFloat(form.credit_limit) || 0)}
-          </p>
-        )}
-      </div>
-
-      {showActiveToggle && (
-        <div className="space-y-2">
-          <Label>Status</Label>
-          <Select
-            value={form.is_active ? "active" : "inactive"}
-            onValueChange={(v) => setForm({ ...form, is_active: v === "active" })}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="active">Active (sale/purchase dropdowns me dikhega)</SelectItem>
-              <SelectItem value="inactive">Inactive (dropdowns se gayab, lekin data safe)</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
-      )}
 
-      <Button
-        onClick={onSubmit}
-        disabled={submitting}
-        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
-      >
-        {submitting ? <Loader2 className="size-4 mr-2 animate-spin" /> : <UserPlus className="size-4 mr-2" />}
-        {submitting ? "Saving..." : submitLabel}
-      </Button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-700">Customer Type</Label>
+            <RadioGroup
+              value={form.type}
+              onValueChange={(v) => setForm({ ...form, type: v as "credit" | "cash" })}
+              className="flex gap-4 pt-1.5"
+            >
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="credit" id="ctype-credit" />
+                <Label htmlFor="ctype-credit" className="font-normal cursor-pointer text-sm">
+                  Credit (ادھار کھاتہ)
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="cash" id="ctype-cash" />
+                <Label htmlFor="ctype-cash" className="font-normal cursor-pointer text-sm">
+                  Cash (نقد)
+                </Label>
+              </div>
+            </RadioGroup>
+          </div>
+
+          {showActiveToggle ? (
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-700">Status</Label>
+              <Select
+                value={form.is_active ? "active" : "inactive"}
+                onValueChange={(v) => setForm({ ...form, is_active: v === "active" })}
+              >
+                <SelectTrigger className="h-10">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active (Dropdowns me dikhega)</SelectItem>
+                  <SelectItem value="inactive">Inactive (Dropdowns se gayab)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="hidden sm:block" />
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-700">
+              Opening Balance (Rs.) <span className="font-normal text-slate-400">— purana balance</span>
+            </Label>
+            <Input
+              type="number"
+              min="0"
+              step="100"
+              placeholder="0"
+              value={form.opening_balance}
+              onChange={(e) => setForm({ ...form, opening_balance: e.target.value })}
+              className="h-10"
+            />
+            <p className="text-[11px] text-slate-500 leading-tight">
+              Customer ka purana balance (system se pehle ke sales). Khata me <strong>opening balance</strong> save hoga.
+            </p>
+            {parseFloat(form.opening_balance) > 0 && (
+              <p className="text-[0.68rem] text-emerald-700 font-medium capitalize bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                {numberToWords(parseFloat(form.opening_balance) || 0)}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-700">
+              Credit Limit (Rs.) <span className="font-normal text-slate-400">— Default 30 Lac</span>
+            </Label>
+            <Input
+              type="number"
+              min="0"
+              step="100000"
+              placeholder="3000000"
+              value={form.credit_limit}
+              onChange={(e) => setForm({ ...form, credit_limit: e.target.value })}
+              className="h-10"
+            />
+            <p className="text-[11px] text-slate-500 leading-tight">
+              Balance limit se exceed hoga toh dashboard par <strong>Over Credit Limit</strong> alert aayega.
+            </p>
+            {parseFloat(form.credit_limit) > 0 && (
+              <p className="text-[0.68rem] text-blue-700 font-medium capitalize bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                {numberToWords(parseFloat(form.credit_limit) || 0)}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Pinned Action Footer */}
+      <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/90 flex items-center justify-end gap-2.5 shrink-0">
+        {onCancel && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={submitting}
+            className="cursor-pointer"
+          >
+            Cancel
+          </Button>
+        )}
+        <Button
+          type="button"
+          onClick={onSubmit}
+          disabled={submitting}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer min-w-[140px] shadow-sm font-medium"
+        >
+          {submitting ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Save className="size-4 mr-2" />}
+          {submitting ? "Saving..." : submitLabel}
+        </Button>
+      </div>
     </div>
   );
 }
