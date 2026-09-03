@@ -111,16 +111,6 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   // Mix order bill amount = sum(ingredient qty * rate) + driver_rent (looked up via mixMeta).
   let actualTotalBill = 0;
   let actualTotalCash = 0;
-  // Subtotal EXCLUDING driver rents / rickshaw fares — used for the
-  // "As Rate/Bag" calculation (per-bag rate based on goods value only).
-  let actualSubtotal = 0;
-  // Total bag count across all sales — used for "As Rate/Bag".
-  // Mix order ingredient rows are stored in kg with no bag_weight_kg, so
-  // we derive bags as qty / 40 (40 kg = 1 bag, per business convention).
-  // Solo sale rows in 'bags' use quantity directly; solo rows in 'kg'
-  // use quantity / (bag_weight_kg ?? 40).
-  let actualTotalBags = 0;
-  const BAG_KG = 40;
   const seenMixOrderIds = new Set<number | string>();
   for (const sale of bill.sales) {
     if (sale.mix_order_id) {
@@ -135,24 +125,10 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
       const mixMetaEntry = bill.mixMeta?.[Number(sale.mix_order_id)];
       const driverRent = mixMetaEntry?.driver_rent ?? 0;
       actualTotalBill += ingredientsTotal + driverRent;
-      actualSubtotal += ingredientsTotal; // NO driver rent in subtotal
       actualTotalCash += ingredients.reduce((sum, s) => sum + s.cash_received, 0);
-      // Each mix order ingredient row is in kg — derive bags = qty / 40
-      actualTotalBags += ingredients.reduce(
-        (sum, s) => sum + (s.quantity > 0 ? s.quantity / BAG_KG : 0),
-        0,
-      );
     } else {
       actualTotalBill += sale.quantity * sale.rate_per_bag + sale.rickshaw_fare;
-      actualSubtotal += sale.quantity * sale.rate_per_bag; // NO rickshaw_fare in subtotal
       actualTotalCash += sale.cash_received;
-      // Solo sale: bags = quantity if unit_type='bags' else quantity / (bag_weight_kg ?? 40)
-      if (sale.unit_type === "bags") {
-        actualTotalBags += sale.quantity;
-      } else {
-        const bw = sale.bag_weight_kg ?? BAG_KG;
-        actualTotalBags += bw > 0 ? sale.quantity / bw : sale.quantity;
-      }
     }
   }
 
@@ -180,18 +156,14 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
       ? bill.totalGoodsValue
       : calculatedGoodsValue;
 
-  // As Rate/Bag = Subtotal (excluding rents) / Total Bags
-  const hasAsRatePerBag = actualTotalBags > 0 && actualSubtotal > 0;
-  const asRatePerBag = hasAsRatePerBag ? actualSubtotal / actualTotalBags : 0;
-  const asRatePerBagStr = hasAsRatePerBag
-    ? `Rs. ${asRatePerBag.toLocaleString("en-PK", { maximumFractionDigits: 2 })}`
-    : "";
-
   const advancePayment = bill.advancePayment ?? 0;
   const effectiveTotalBill = actualTotalBill;
   const effectiveTotalCash = actualTotalCash + totalStandalonePayments;
+  const totalReceivedPayments =
+    effectiveTotalCash + (Number(totalGoodsValue) || 0) + (Number(advancePayment) || 0);
+  const openingBalVal = Number(bill.openingBalance) || 0;
   const effectiveBalanceDue =
-    bill.openingBalance + effectiveTotalBill - effectiveTotalCash - totalGoodsValue - advancePayment;
+    openingBalVal + effectiveTotalBill - totalReceivedPayments;
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pw = doc.internal.pageSize.getWidth();
@@ -329,11 +301,11 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(...C_DARK);
-  doc.text(`Rs. ${bill.openingBalance.toLocaleString("en-PK")}`, rightX + 28, y + 12);
+  doc.text(`Rs. ${openingBalVal.toLocaleString("en-PK")}`, rightX + 28, y + 12);
   doc.setFontSize(8.5);
   doc.setFont("helvetica", "normal");
   doc.text(`Rs. ${effectiveTotalBill.toLocaleString("en-PK")}`, rightX + 28, y + 18);
-  doc.text(`Rs. ${effectiveTotalCash.toLocaleString("en-PK")}`, rightX + 28, y + 24);
+  doc.text(`Rs. ${totalReceivedPayments.toLocaleString("en-PK")}`, rightX + 28, y + 24);
 
   let sumOffset = 0;
   if (totalGoodsValue > 0) {
@@ -625,8 +597,10 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   // computed upfront at the top of this function (so the summary box at
   // the top of the bill can use the same values). Reuse them here for
   // the totals box at the bottom of the bill.
+  const openingBalStr = `Rs. ${openingBalVal.toLocaleString("en-PK")}`;
   const totalBillStr = `Rs. ${effectiveTotalBill.toLocaleString("en-PK")}`;
-  const totalCashStr = `Rs. ${effectiveTotalCash.toLocaleString("en-PK")}`;
+  const totalCashStr = `Rs. ${actualTotalCash.toLocaleString("en-PK")}`;
+  const totalPaidStr = `Rs. ${totalReceivedPayments.toLocaleString("en-PK")}`;
   const balanceStr = `Rs. ${effectiveBalanceDue.toLocaleString("en-PK")}`;
 
   autoTable(doc, {
@@ -743,97 +717,57 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   });
 
   /* ════════════════════════════════════════════════════════
-   *  TOTALS SECTION (Unboxed summary list) + Amount in words
+   *  TOTALS SECTION (Streamlined Summary) + Amount in words
    * ════════════════════════════════════════════════════════ */
   const fy = (doc as any).lastAutoTable.finalY + 8;
-  const tBoxW = 85;
+  const tBoxW = 98;
   const tBoxX = pw - m - tBoxW;
   let ty = fy + 5;
   const labelX = tBoxX;
   const valX = pw - m;
 
-  const hasOpening = bill.openingBalance > 0;
-  const hasAdvance = advancePayment > 0;
-
-  // Opening Balance (only when > 0)
-  if (hasOpening) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(...C_MUTED_GRAY);
-    doc.text("Opening Bal:", labelX, ty);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(...C_DARK);
-    doc.text(`Rs. ${bill.openingBalance.toLocaleString("en-PK")}`, valX, ty, { align: "right" });
-    ty += 6.5;
-  }
-
-  // Total Bill
+  // 1. Opening Balance (Purana Baqaya)
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(...C_MUTED_GRAY);
-  doc.text("Total Bill:", labelX, ty);
+  doc.text("Opening Balance (Purana Baqaya):", labelX, ty);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...C_DARK);
+  doc.text(openingBalStr, valX, ty, { align: "right" });
+
+  // 2. Total Sales / Purchases (Naya Bill)
+  ty += 6.5;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(...C_MUTED_GRAY);
+  doc.text("Total Sales / Purchases (Naya Bill):", labelX, ty);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...C_DARK);
   doc.text(totalBillStr, valX, ty, { align: "right" });
 
-  // As Rate/Bag (= Subtotal excluding rents / Total Bags) — below Total Bill
-  if (hasAsRatePerBag) {
-    ty += 6.5;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
-    doc.setTextColor(...C_MUTED_GRAY);
-    doc.text(`As Rate/Bag (${(Number(actualTotalBags) || 0).toLocaleString("en-PK", { maximumFractionDigits: 2 })} bags):`, labelX, ty);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(...C_DARK);
-    doc.text(asRatePerBagStr, valX, ty, { align: "right" });
-  }
-
-  // Cash Paid / Recoveries
+  // 3. Total Received / Payments (Wasooli)
   ty += 6.5;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(...C_MUTED_GRAY);
-  doc.text("Cash Paid / Rec:", labelX, ty);
+  doc.text("Total Received / Payments (Wasooli):", labelX, ty);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...C_DARK);
-  doc.text(totalCashStr, valX, ty, { align: "right" });
-
-  // Paid in Goods (only when > 0)
-  if (totalGoodsValue > 0) {
-    ty += 6.5;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(...C_MUTED_GRAY);
-    doc.text("Paid in Goods:", labelX, ty);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(...C_DARK);
-    doc.text(`Rs. ${(Number(totalGoodsValue) || 0).toLocaleString("en-PK")}`, valX, ty, { align: "right" });
-  }
-
-  // Advance Payment (only when > 0)
-  if (hasAdvance) {
-    ty += 6.5;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(...C_MUTED_GRAY);
-    doc.text("Advance Paid:", labelX, ty);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(...C_GREEN);
-    doc.text(`Rs. ${(Number(advancePayment) || 0).toLocaleString("en-PK")}`, valX, ty, { align: "right" });
-  }
+  doc.text(totalPaidStr, valX, ty, { align: "right" });
 
   // Divider line before Balance Due
-  ty += 4.5;
+  ty += 4;
   doc.setDrawColor(...C_GRAY_LIGHT);
   doc.setLineWidth(0.3);
   doc.line(labelX, ty, valX, ty);
 
-  // Balance Due
+  // 4. Net Balance Due (Kul Baqaya)
   ty += 6.5;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
+  doc.setFontSize(10.5);
   doc.setTextColor(...C_GREEN);
-  doc.text("BALANCE DUE", labelX, ty);
+  doc.text("Net Balance Due (Kul Baqaya):", labelX, ty);
+  doc.setFontSize(12);
   doc.text(balanceStr, valX, ty, { align: "right" });
 
   // Double bottom border under Balance Due
@@ -844,7 +778,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   doc.setLineWidth(0.2);
   doc.line(labelX, ty + 0.8, valX, ty + 0.8);
 
-  // Amount in words — left side, strictly left-aligned at margin m
+  // Amount in words — left side, strictly left-aligned opposite summary table
   doc.setFont("helvetica", "italic");
   doc.setFontSize(8.5);
   doc.setTextColor(...C_MUTED_GRAY);
@@ -854,7 +788,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
   doc.setTextColor(...C_DARK);
   const wordsText = numberToRupeeWords(effectiveBalanceDue);
   const wordsLines = doc.splitTextToSize(wordsText, tBoxX - m - 6);
-  doc.text(wordsLines, m, fy + 11);
+  doc.text(wordsLines, m, fy + 11, { lineHeightFactor: 1.3 });
 
   /* ════════════════════════════════════════════════════════
    *  TERMS & CONDITIONS — Clean left-aligned layout
@@ -933,7 +867,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
     customerName: bill.customer.name ?? "N/A",
     generatedAt: bill.generatedAt,
     totalBill: effectiveTotalBill,
-    cashPaid: effectiveTotalCash,
+    cashPaid: totalReceivedPayments,
     balanceDue: effectiveBalanceDue,
     advancePayment,
   });
@@ -942,7 +876,7 @@ export async function generateCustomerBillPDF(bill: CustomerBillData): Promise<C
     fileName,
     caption,
     totalBill: effectiveTotalBill,
-    totalCashPaid: effectiveTotalCash,
+    totalCashPaid: totalReceivedPayments,
     balanceDue: effectiveBalanceDue,
   };
 }

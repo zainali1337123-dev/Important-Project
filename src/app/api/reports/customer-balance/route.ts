@@ -110,7 +110,9 @@ export async function GET(request: NextRequest) {
     }
 
     const balancesMap: Record<number, any> = {};
-    const customersWithBalances = (customers || []).map((c: any) => {
+    const customersWithBalances = (customers || [])
+      .filter((c: any) => c.name.toLowerCase() !== "walk-in cash customer")
+      .map((c: any) => {
       const cId = Number(c.id);
       const opening = Number(c.opening_balance) || 0;
       const advance = Number(c.advance_payment) || 0;

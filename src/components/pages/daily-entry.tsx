@@ -61,6 +61,7 @@ import {
   Wallet,
   Pencil,
   FileText,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import ConfirmAction from "@/components/shared/confirm-action";
@@ -569,10 +570,38 @@ export default function DailyEntryPage() {
   const unitType = unitChoice;
 
   const filteredCustomers = useMemo(() => {
-    if (!customerSearch.trim()) return customers.filter((c) => c.is_active);
+    const base = customers.filter(
+      (c) => c.is_active && c.name.toLowerCase() !== "walk-in cash customer"
+    );
+    if (!customerSearch.trim()) return base;
     const q = customerSearch.toLowerCase();
-    return customers.filter((c) => c.is_active && c.name.toLowerCase().includes(q));
+    return base.filter((c) => c.name.toLowerCase().includes(q));
   }, [customerSearch, customers]);
+
+  // ── Auto-lock Cash Received to exact Bill Amount for Cash Customers ──
+  useEffect(() => {
+    if (customerType === "cash") {
+      setCashReceived(String(grandTotal));
+    }
+  }, [customerType, grandTotal]);
+
+  const handleCustomerTypeChange = (type: "credit" | "cash") => {
+    setCustomerType(type);
+    if (type === "cash") {
+      setOpeningBalance("0");
+      setUseAdvance(false);
+      setCashReceived(String(grandTotal));
+      setSelectedCustomerId("");
+    } else {
+      setCashReceived("0");
+      if (selectedCustomerId) {
+        const c = customers.find((x) => String(x.id) === selectedCustomerId);
+        if (c) {
+          setOpeningBalance(String(c.opening_balance ?? 0));
+        }
+      }
+    }
+  };
 
   // ── Track whether the OB input differs from the customer's saved value ──
   // Used to show a "Modified" badge + confirm to the user that the saved
@@ -656,8 +685,11 @@ export default function DailyEntryPage() {
   };
 
   const handleCompleteSale = async () => {
-    if (!customerName.trim()) {
-      toast.error("Please enter a customer name.");
+    const isCash = customerType === "cash";
+    const displayName = customerName.trim() || (isCash ? "Walk-in Cash Customer" : "");
+
+    if (!isCash && !displayName) {
+      toast.error("Please enter or select a credit customer name for Khata.");
       return;
     }
     if (cartItems.length === 0) {
@@ -667,60 +699,69 @@ export default function DailyEntryPage() {
 
     setSavingSale(true);
     try {
-      // Parse opening balance — defaults to 0 if blank/invalid
-      const obNum = Math.max(0, parseFloat(openingBalance) || 0);
-
-      // Find or create customer
-      let customerId: number;
-      const existing = customers.find(
-        (c) => c.name.toLowerCase() === customerName.trim().toLowerCase()
-      );
-      // Track whether OB was actually changed so we can toast about it
-      // after the sale completes.
+      let customerId: number | null = null;
       let obWasUpdated = false;
       let obOldValue = 0;
       let obNewValue = 0;
-      if (existing) {
-        customerId = existing.id;
-        obOldValue = existing.opening_balance ?? 0;
-        obNewValue = obNum;
-        // Persist opening balance update — only send PUT if the value
-        // actually changed, to avoid unnecessary writes. We do this BEFORE
-        // creating the sale so the balance_due calc on the next reload
-        // reflects the latest opening balance.
-        if (Math.abs(obNum - obOldValue) > 0.001) {
-          try {
-            const upRes = await fetch("/api/customers", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: customerId, opening_balance: obNum }),
-            });
-            if (upRes.ok) {
-              obWasUpdated = true;
-              // Update local state so the customer dropdown reflects the new OB
-              setCustomers((prev) =>
-                prev.map((c) => (c.id === customerId ? { ...c, opening_balance: obNum } : c))
-              );
-            }
-          } catch {
-            // Non-fatal — sale should still go through even if OB update fails
-            console.warn("Failed to update opening balance for customer", customerId);
-          }
+      let existingCustName = displayName;
+
+      if (isCash) {
+        // ZERO KHATA POLLUTION:
+        // Do NOT insert into `customers` table.
+        // Do NOT update opening_balance.
+        // Do NOT apply advance.
+        // Link to the static "Walk-in Cash Customer" row.
+        const walkIn = customers.find(
+          (c) => c.name.toLowerCase() === "walk-in cash customer"
+        );
+        if (walkIn) {
+          customerId = walkIn.id;
         }
       } else {
-        const res = await fetch("/api/customers", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: customerName.trim(),
-            type: customerType,
-            opening_balance: obNum,
-          }),
-        });
-        if (!res.ok) throw new Error(await apiError(res, "Failed to create customer"));
-        const data = await res.json();
-        customerId = data.customer?.id;
-        if (data.customer) setCustomers((prev) => [...prev, data.customer]);
+        // Parse opening balance — defaults to 0 if blank/invalid
+        const obNum = Math.max(0, parseFloat(openingBalance) || 0);
+
+        // Find or create credit customer
+        const existing = customers.find(
+          (c) => c.name.toLowerCase() === displayName.toLowerCase()
+        );
+        if (existing) {
+          customerId = existing.id;
+          existingCustName = existing.name;
+          obOldValue = existing.opening_balance ?? 0;
+          obNewValue = obNum;
+          if (Math.abs(obNum - obOldValue) > 0.001) {
+            try {
+              const upRes = await fetch("/api/customers", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: customerId, opening_balance: obNum }),
+              });
+              if (upRes.ok) {
+                obWasUpdated = true;
+                setCustomers((prev) =>
+                  prev.map((c) => (c.id === customerId ? { ...c, opening_balance: obNum } : c))
+                );
+              }
+            } catch {
+              console.warn("Failed to update opening balance for customer", customerId);
+            }
+          }
+        } else {
+          const res = await fetch("/api/customers", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: displayName,
+              type: "credit",
+              opening_balance: obNum,
+            }),
+          });
+          if (!res.ok) throw new Error(await apiError(res, "Failed to create customer"));
+          const data = await res.json();
+          customerId = data.customer?.id;
+          if (data.customer) setCustomers((prev) => [...prev, data.customer]);
+        }
       }
 
       const items = cartItems.map((item) => ({
@@ -731,11 +772,11 @@ export default function DailyEntryPage() {
         bag_weight_kg: item.bag_weight_kg,
       }));
 
-      // ── If "Use advance" is checked, bump cash_received by the applied ──
-      // amount so the sale's balance math reflects the offset. The API route
-      // will then decrement customer.advance_payment by the same amount.
-      const cashReceivedNum = Number(cashReceived) || 0;
-      const effectiveCashReceived = cashReceivedNum + appliedAdvance;
+      // For cash sales: cash received is strictly 100% of grandTotal.
+      // For credit sales: whatever was entered + applied advance.
+      const effectiveCashReceived = isCash
+        ? grandTotal
+        : (Number(cashReceived) || 0) + (useAdvance ? appliedAdvance : 0);
 
       const res = await fetch("/api/sales", {
         method: "POST",
@@ -743,14 +784,14 @@ export default function DailyEntryPage() {
         body: JSON.stringify({
           items,
           customer_id: customerId,
+          customer_type: customerType,
+          customer_name: displayName,
           location_id: locationId,
           sale_date: date,
           cash_received: effectiveCashReceived,
           rickshaw_fare: rickshawNum,
           rickshaw_driver: rickshawDriver || null,
-          // Tell the API to decrement customer.advance_payment by this much
-          // AFTER the sale is recorded. 0 when "Use advance" is unchecked.
-          apply_advance: appliedAdvance,
+          apply_advance: isCash ? 0 : (useAdvance ? appliedAdvance : 0),
         }),
       });
       if (!res.ok) {
@@ -758,7 +799,7 @@ export default function DailyEntryPage() {
         throw new Error(err.detail || err.error || "Failed to complete sale");
       }
       const saleResp = await res.json().catch(() => ({}));
-      const advanceConsumed = Number(saleResp?.advance_consumed ?? appliedAdvance);
+      const advanceConsumed = Number(saleResp?.advance_consumed ?? (isCash ? 0 : appliedAdvance));
 
       clearCart();
       setRickshawFare("0");
@@ -769,25 +810,22 @@ export default function DailyEntryPage() {
       setSelectedCustomerId("");
       setUseAdvance(false);
 
-      // ── Compose the success toast ──
-      // If the OB was changed for an existing customer, mention the overwrite
-      // explicitly so the user knows the saved opening_balance was updated.
       const advanceDesc = advanceConsumed > 0
         ? ` · Advance used: Rs. ${fmt(advanceConsumed)}`
         : "";
       if (obWasUpdated) {
-        toast.success(`Sale completed for ${customerName} — Rs. ${fmt(grandTotal)} total bill.`, {
-          description: `Opening balance OVERWRITTEN: Rs. ${fmt(obOldValue)} → Rs. ${fmt(obNewValue)} for ${existing?.name ?? customerName}.${advanceDesc}`,
+        toast.success(`Sale completed for ${displayName} — Rs. ${fmt(grandTotal)} total bill.`, {
+          description: `Opening balance OVERWRITTEN: Rs. ${fmt(obOldValue)} → Rs. ${fmt(obNewValue)} for ${existingCustName}.${advanceDesc}`,
           duration: 6000,
         });
       } else {
-        toast.success(`Sale completed for ${customerName} — Rs. ${fmt(grandTotal)} total bill.${advanceDesc}`);
+        toast.success(`Sale completed for ${displayName} — Rs. ${fmt(grandTotal)} total bill.${advanceDesc}`);
       }
       invalidateCache("stock");
-      invalidateCache("customers");
+      if (!isCash) {
+        invalidateCache("customers");
+      }
       await Promise.all([loadDayData(date), loadMasterData(), loadCustomerPayments(date)]);
-      // Bump the trigger so the <AvailableStock> panel refetches stock
-      // and the displayed values reflect the just-completed sale.
       setStockRefreshTrigger((n) => n + 1);
     } catch (e: any) {
       toast.error(e.message || "Failed to complete sale");
@@ -1520,37 +1558,59 @@ export default function DailyEntryPage() {
           </CardContent>
         </Card>
 
-        <Card id="section-search-customer" className="rounded-2xl border-slate-200/60 shadow-sm scroll-mt-24">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Search className="size-5 text-slate-600" /> Search Customer
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs uppercase text-slate-500 font-semibold">Type to search</Label>
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
-                  <Input placeholder="Start typing a customer name..." value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} className="pl-9" />
+        {customerType === "credit" ? (
+          <Card id="section-search-customer" className="rounded-2xl border-slate-200/60 shadow-sm scroll-mt-24">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Search className="size-5 text-slate-600" /> Search Credit Customer (ادھار کھاتہ)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs uppercase text-slate-500 font-semibold">Type to search</Label>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
+                    <Input placeholder="Start typing a customer name..." value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} className="pl-9" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs uppercase text-slate-500 font-semibold">Select customer</Label>
+                  <Select value={selectedCustomerId} onValueChange={handleCustomerSelect}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Click to fill name" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredCustomers.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>{c.name} ({c.type})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs uppercase text-slate-500 font-semibold">Select customer</Label>
-                <Select value={selectedCustomerId} onValueChange={handleCustomerSelect}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Click to fill name" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredCustomers.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>{c.name} ({c.type})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card id="section-search-customer" className="rounded-2xl border-dashed border-slate-200 bg-slate-50/60 shadow-none scroll-mt-24">
+            <CardContent className="py-3.5 px-4 flex items-center justify-between gap-3 text-xs text-slate-500 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center rounded-md bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[11px] font-semibold">
+                  Cash Counter Mode
+                </span>
+                <span>Walk-in cash counter sale active — customer search & Khata accounts are bypassed.</span>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-blue-600 hover:text-blue-700 p-0 hover:bg-transparent underline"
+                onClick={() => handleCustomerTypeChange("credit")}
+              >
+                Switch to Credit (ادھار کھاتہ)
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         <Card id="section-complete-sale" className="rounded-2xl border-slate-200/60 shadow-sm scroll-mt-24">
           <CardHeader className="pb-2">
@@ -1561,7 +1621,7 @@ export default function DailyEntryPage() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label className="text-xs uppercase text-slate-500 font-semibold">Customer Type</Label>
-              <RadioGroup value={customerType} onValueChange={(v) => setCustomerType(v as "credit" | "cash")} className="flex gap-4">
+              <RadioGroup value={customerType} onValueChange={(v) => handleCustomerTypeChange(v as "credit" | "cash")} className="flex gap-4">
                 <div className="flex items-center gap-2">
                   <RadioGroupItem value="credit" id="ctype-credit" />
                   <Label htmlFor="ctype-credit" className="font-normal cursor-pointer">Credit (ادھار کھاتہ)</Label>
@@ -1575,8 +1635,23 @@ export default function DailyEntryPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-xs uppercase text-slate-500 font-semibold">Customer Name</Label>
-                <Input placeholder="Type name — existing customer is matched automatically" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
+                <Label className="text-xs uppercase text-slate-500 font-semibold">
+                  Customer Name {customerType === "cash" ? (
+                    <span className="text-slate-400 font-normal normal-case">(Optional for Walk-in Cash)</span>
+                  ) : (
+                    <span className="text-red-500 ml-0.5">*</span>
+                  )}
+                </Label>
+                <Input
+                  placeholder={customerType === "cash" ? "Walk-in Cash Customer (Optional)" : "Type name — existing customer is matched automatically"}
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                />
+                {customerType === "cash" && (
+                  <p className="text-[11px] text-slate-500 leading-tight">
+                    Walk-in cash counter sale. Customer name is strictly optional and will not create a Khata account or pollute debtors.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label className="text-xs uppercase text-slate-500 font-semibold">Rickshaw Freight (Rs.)</Label>
@@ -1587,70 +1662,90 @@ export default function DailyEntryPage() {
                 <Input placeholder="Leave blank if not applicable" value={rickshawDriver} onChange={(e) => setRickshawDriver(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs uppercase text-slate-500 font-semibold">Cash Received Now (Rs.)</Label>
-                <Input type="number" min="0" step="100" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} />
-              </div>
-            </div>
-
-            {/* Opening Balance — one-time previous balance the user can enter */}
-            <div className={`rounded-lg border px-4 py-3 space-y-2 transition-colors ${obModified ? "border-blue-300 bg-blue-50/60" : "border-amber-200 bg-amber-50/60"}`}>
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex-1 min-w-[200px] space-y-1.5">
-                  <Label className="text-xs uppercase text-amber-700 font-semibold flex items-center gap-1.5 flex-wrap">
-                    Opening Balance (Rs.) — purana balance
-                    {obModified && savedOpeningBalance !== null && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-600 text-white px-2 py-0.5 text-[10px] font-bold tracking-normal normal-case">
-                        Modified · will overwrite Rs. {fmt(savedOpeningBalance)}
-                      </span>
-                    )}
-                  </Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs uppercase text-slate-500 font-semibold">Cash Received Now (Rs.)</Label>
+                  {customerType === "cash" && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-semibold">
+                      <Lock className="size-3" /> Auto-Locked (Full Payment)
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
                   <Input
                     type="number"
                     min="0"
                     step="100"
-                    placeholder="0"
-                    value={openingBalance}
-                    onChange={(e) => setOpeningBalance(e.target.value)}
-                    className="bg-white"
+                    value={customerType === "cash" ? grandTotal : cashReceived}
+                    onChange={(e) => {
+                      if (customerType !== "cash") {
+                        setCashReceived(e.target.value);
+                      }
+                    }}
+                    readOnly={customerType === "cash"}
+                    disabled={customerType === "cash"}
+                    className={customerType === "cash" ? "bg-slate-100/90 text-slate-800 font-bold border-slate-300 cursor-not-allowed pr-9" : ""}
                   />
-                  <p className="text-[11px] text-amber-800/80 leading-tight">
-                    Agar customer ka koi purana balance hai jo aap ko pata hai (system se pehle ke sales),
-                    wo yahan likh dein. Ye customer ki Khata me <strong>opening balance</strong> ke roop me
-                    save ho jayega aur har bill me total ke saath add hoga. Existing customer select karne par
-                    purani value auto-fill ho jati hai.{" "}
-                    <strong className="text-blue-700">Agar value change ki to sale complete karte hi
-                    database me overwrite ho jayega.</strong>
+                  {customerType === "cash" && (
+                    <Lock className="absolute right-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
+                  )}
+                </div>
+                {customerType === "cash" && (
+                  <p className="text-[11px] text-emerald-700 font-medium leading-tight">
+                    In a cash counter transaction, the bill amount must be paid in full on the spot. Auto-locked to Rs. {fmt(grandTotal)}.
                   </p>
-                </div>
-                <div className="flex flex-col items-end shrink-0">
-                  <span className="text-[10px] uppercase tracking-wider text-amber-700/80 font-semibold">Total Receivable</span>
-                  <span className="text-lg font-extrabold text-amber-900 tabular-nums">
-                    Rs. {fmt((parseFloat(openingBalance) || 0) + grandTotal)}
-                  </span>
-                  <span className="text-[10px] text-amber-700/70">
-                    (Opening + Grand Total)
-                  </span>
-                </div>
+                )}
               </div>
             </div>
 
-            {/* ── Use Advance Payment block ──
-                Visible ONLY when the selected customer has an existing
-                advance_payment balance (> 0). Lets the user decide whether
-                to auto-consume part of that advance against this sale.
+            {/* Opening Balance — ONLY visible when Credit (ادھار کھاتہ) is selected */}
+            {customerType === "credit" && (
+              <div className={`rounded-lg border px-4 py-3 space-y-2 transition-colors ${obModified ? "border-blue-300 bg-blue-50/60" : "border-amber-200 bg-amber-50/60"}`}>
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex-1 min-w-[200px] space-y-1.5">
+                    <Label className="text-xs uppercase text-amber-700 font-semibold flex items-center gap-1.5 flex-wrap">
+                      Opening Balance (Rs.) — purana balance
+                      {obModified && savedOpeningBalance !== null && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-600 text-white px-2 py-0.5 text-[10px] font-bold tracking-normal normal-case">
+                          Modified · will overwrite Rs. {fmt(savedOpeningBalance)}
+                        </span>
+                      )}
+                    </Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="100"
+                      placeholder="0"
+                      value={openingBalance}
+                      onChange={(e) => setOpeningBalance(e.target.value)}
+                      className="bg-white"
+                    />
+                    <p className="text-[11px] text-amber-800/80 leading-tight">
+                      Agar customer ka koi purana balance hai jo aap ko pata hai (system se pehle ke sales),
+                      wo yahan likh dein. Ye customer ki Khata me <strong>opening balance</strong> ke roop me
+                      save ho jayega aur har bill me total ke saath add hoga. Existing customer select karne par
+                      purani value auto-fill ho jati hai.{" "}
+                      <strong className="text-blue-700">Agar value change ki to sale complete karte hi
+                      database me overwrite ho jayega.</strong>
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end shrink-0">
+                    <span className="text-[10px] uppercase tracking-wider text-amber-700/80 font-semibold">Total Receivable</span>
+                    <span className="text-lg font-extrabold text-amber-900 tabular-nums">
+                      Rs. {fmt((parseFloat(openingBalance) || 0) + grandTotal)}
+                    </span>
+                    <span className="text-[10px] text-amber-700/70">
+                      (Opening + Grand Total)
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
-                Behaviour:
-                  • Checkbox unchecked (default) → sale proceeds normally,
-                    advance_payment is left untouched.
-                  • Checkbox checked → appliedAdvance = min(advance, grandTotal)
-                    is added to effective cash_received, and the API decrements
-                    customer.advance_payment by that same amount after the sale.
-                  • If advance > grandTotal, only grandTotal is consumed
-                    (can't apply more advance than the bill).
-                  • The customer's remaining advance after this sale is shown
-                    live so the user knows what will be left.
+            {/* ── Use Advance Payment block ──
+                Visible ONLY when Credit is selected AND the selected customer has an existing
+                advance_payment balance (> 0).
             */}
-            {selectedCustomerAdvance > 0 && (
+            {customerType === "credit" && selectedCustomerAdvance > 0 && (
               <div className="rounded-lg border border-emerald-300 bg-emerald-50/70 px-4 py-3 space-y-2">
                 <div className="flex items-start gap-3 flex-wrap">
                   <div className="flex items-start gap-2 flex-1 min-w-[200px]">

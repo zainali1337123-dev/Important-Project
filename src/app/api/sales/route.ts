@@ -176,10 +176,56 @@ export async function POST(request: NextRequest) {
       bag_weight_kg,
       transaction_group_id,
       apply_advance,
+      customer_type,
+      customer_name,
     } = body;
 
-    if (!customer_id) {
-      return NextResponse.json({ error: "Customer ID is required" }, { status: 400 });
+    const isCashSale = customer_type === "cash" || !customer_id;
+    let resolvedCustomerId: number;
+
+    if (isCashSale) {
+      // Resolve or create single static system customer row "Walk-in Cash Customer"
+      // NEVER create ad-hoc customer rows in customers table or pollute Khata
+      const { data: walkIn } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("name", "Walk-in Cash Customer")
+        .maybeSingle();
+
+      if (walkIn?.id) {
+        resolvedCustomerId = walkIn.id;
+      } else {
+        const { data: created, error: createErr } = await supabase
+          .from("customers")
+          .insert([
+            {
+              name: "Walk-in Cash Customer",
+              type: "cash",
+              opening_balance: 0,
+              advance_payment: 0,
+              credit_limit: 0,
+              is_active: true,
+            },
+          ])
+          .select("id")
+          .single();
+
+        if (createErr || !created?.id) {
+          const { data: retry } = await supabase
+            .from("customers")
+            .select("id")
+            .ilike("name", "%walk-in%")
+            .maybeSingle();
+          resolvedCustomerId = retry?.id || Number(customer_id) || 1;
+        } else {
+          resolvedCustomerId = created.id;
+        }
+      }
+    } else {
+      if (!customer_id) {
+        return NextResponse.json({ error: "Customer ID is required for credit sales" }, { status: 400 });
+      }
+      resolvedCustomerId = Number(customer_id);
     }
 
     const effectiveDate = sale_date || date || new Date().toISOString().split("T")[0];
@@ -245,7 +291,7 @@ export async function POST(request: NextRequest) {
 
       const insertRows = items.map((item: any, idx: number) =>
         cleanSaleRow({
-          customer_id: Number(customer_id),
+          customer_id: resolvedCustomerId,
           product_id: Number(item.product_id),
           quantity: Number(item.quantity) || 0,
           rate_per_bag: Number(item.rate_per_bag || item.rate) || 0,
@@ -298,29 +344,29 @@ export async function POST(request: NextRequest) {
         ]);
       }
 
-      // Decrement advance if applied
-      if (apply_advance && Number(apply_advance) > 0) {
+      // Decrement advance if applied (only for credit customers)
+      if (!isCashSale && apply_advance && Number(apply_advance) > 0) {
         const { data: cust } = await supabase
           .from("customers")
           .select("advance_payment")
-          .eq("id", customer_id)
+          .eq("id", resolvedCustomerId)
           .single();
         if (cust) {
           const newAdv = Math.max(0, (Number(cust.advance_payment) || 0) - Number(apply_advance));
-          await supabase.from("customers").update({ advance_payment: newAdv }).eq("id", customer_id);
+          await supabase.from("customers").update({ advance_payment: newAdv }).eq("id", resolvedCustomerId);
         }
       }
 
-      return NextResponse.json({ sales: data, sale: data?.[0], advance_consumed: apply_advance || 0 });
+      return NextResponse.json({ sales: data, sale: data?.[0], advance_consumed: isCashSale ? 0 : (apply_advance || 0) });
     }
 
     // Case 2: Single item sale
     if (!product_id) {
-      return NextResponse.json({ error: "Customer ID and Product ID are required" }, { status: 400 });
+      return NextResponse.json({ error: "Product ID is required" }, { status: 400 });
     }
 
     const insertPayload = cleanSaleRow({
-      customer_id: Number(customer_id),
+      customer_id: resolvedCustomerId,
       product_id: Number(product_id),
       quantity: Number(quantity) || 0,
       rate_per_bag: Number(rate_per_bag) || 0,
