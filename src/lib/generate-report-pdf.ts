@@ -104,11 +104,23 @@ function drawReportHeader(
 
 /** Draw Standard Supervisor Verification & Stamp Footer */
 function drawSupervisorFooter(doc: any, pw: number, ph: number, m: number, currentY: number): number {
-  let sigY = Math.max(currentY + 16, ph - 38);
-  if (sigY > ph - 30) {
+  // If the preceding table or section ended too low, overflow cleanly onto a fresh final page
+  if (currentY > ph - 46) {
     doc.addPage();
-    sigY = ph - 38;
+    doc.setFillColor(...C_GOLD);
+    doc.rect(0, 0, pw, 2.5, "F");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(...C_GREEN);
+    doc.text("DANISH CATTLE FEED — SUPERVISOR VERIFICATION & SIGN-OFF", m, 11);
+    doc.setDrawColor(...C_GRAY_LIGHT);
+    doc.setLineWidth(0.2);
+    doc.line(m, 14.5, pw - m, 14.5);
   }
+
+  // Lock signature block and stamp strictly to the very bottom of the final page
+  const sigY = ph - 36;
 
   // Stamp circle on left
   doc.setDrawColor(...C_GREEN);
@@ -157,6 +169,32 @@ function drawSupervisorFooter(doc: any, pw: number, ph: number, m: number, curre
   doc.rect(0, ph - 2, pw, 2, "F");
 
   return sigY + 14;
+}
+
+/** Decorate all document pages with consistent bottom branding and page numbers */
+function addPageNumbers(doc: any, pw: number, ph: number, m: number): void {
+  const totalPages = typeof doc.getNumberOfPages === "function" ? doc.getNumberOfPages() : 1;
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+
+    // Ensure bottom gold bar is drawn on every page
+    doc.setFillColor(...C_GOLD);
+    doc.rect(0, ph - 2, pw, 2, "F");
+
+    // Bottom accent line
+    doc.setDrawColor(...C_GOLD);
+    doc.setLineWidth(0.8);
+    doc.line(m, ph - 8, pw - m, ph - 8);
+    doc.setDrawColor(...C_GREEN);
+    doc.setLineWidth(0.2);
+    doc.line(m, ph - 7.2, pw - m, ph - 7.2);
+
+    // Page number in center
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(...C_MUTED_GRAY);
+    doc.text(`Page ${p} of ${totalPages}`, pw / 2, ph - 4.2, { align: "center" });
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -367,11 +405,15 @@ export async function generateSalesReportPDF(params: SalesReportParams): Promise
       9: { cellWidth: 25, halign: "right" },
       10: { cellWidth: 25, halign: "right" },
     },
-    margin: { left: m, right: m },
+    margin: { top: 18, bottom: 46, left: m, right: m },
+    showHead: "everyPage",
+    showFoot: "lastPage",
+    pageBreak: "auto",
   });
 
   const finalY = (doc as any).lastAutoTable?.finalY || y + 30;
   drawSupervisorFooter(doc, pw, ph, m, finalY);
+  addPageNumbers(doc, pw, ph, m);
 
   doc.save(`Sales-Report-${date}.pdf`);
 }
@@ -996,14 +1038,22 @@ export async function generateDayEndSupervisorSummaryPDF(params: DayEndReportPar
 
   y = (doc as any).lastAutoTable?.finalY + 8;
 
-  // Section 2: Recent Sales Highlight (First 10)
+  // Section 2: Full Sales Breakdown (Auto multi-page overflow)
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
   doc.setTextColor(...C_GREEN);
   doc.text(`TODAY'S SALES BREAKDOWN (${sales.length} total)`, m, y);
   y += 2;
 
-  const salesRows = sales.slice(0, 15).map((s, i) => [
+  const totalSalesQtyBags = sales.reduce((sum, s) => sum + (s.unit_type === "kg" ? 0 : Number(s.quantity) || 0), 0);
+  const totalSalesQtyKg = sales.reduce((sum, s) => sum + (s.unit_type === "kg" ? Number(s.quantity) || 0 : 0), 0);
+  const qtyTotalSummary =
+    totalSalesQtyKg > 0
+      ? `${formatRs(totalSalesQtyBags)} bags + ${formatRs(totalSalesQtyKg)} kg`
+      : `${formatRs(totalSalesQtyBags)} bags`;
+
+  // Map ALL sales without any artificial slice or truncation
+  const salesRows = sales.map((s, i) => [
     String(i + 1),
     s.customers?.name || "Cash Customer",
     s.products?.name || (s.mix_order_id ? "Mix Order" : "Feed"),
@@ -1015,19 +1065,63 @@ export async function generateDayEndSupervisorSummaryPDF(params: DayEndReportPar
 
   const daySalesUrduCellMap = createTableUrduCellMap(
     salesRows,
-    { 1: 43 * 2.835, 2: 43 * 2.835 },
+    { 1: 45 * 2.835, 2: 45 * 2.835 },
     { fontSize: 7.2, color: "#28323c", scale: 3 }
   );
   const daySalesUrduHooks = getAutoTableUrduHooks(daySalesUrduCellMap, doc, { paddingMm: 1.8 });
 
   autoTable(doc, {
     startY: y,
+    showHead: "everyPage",
+    showFoot: "lastPage",
+    pageBreak: "auto",
     ...daySalesUrduHooks,
+    didDrawPage: (data: any) => {
+      // Repeat running mini-header on overflow pages
+      if (data.pageNumber > 1) {
+        doc.setFillColor(...C_GOLD);
+        doc.rect(0, 0, pw, 2.5, "F");
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(...C_GREEN);
+        doc.text("DANISH CATTLE FEED — SUPERVISOR DAY SUMMARY", m, 11);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.setTextColor(...C_GRAY);
+        doc.text(`Audit Date: ${date}  |  Today's Sales Breakdown (Page ${data.pageNumber})`, pw - m, 11, { align: "right" });
+
+        doc.setDrawColor(...C_GRAY_LIGHT);
+        doc.setLineWidth(0.2);
+        doc.line(m, 14.5, pw - m, 14.5);
+      }
+    },
     head: [["#", "Customer", "Product", "Qty", "Rate", "Bill (Rs.)", "Cash (Rs.)"]],
     body: salesRows.length ? salesRows : [["—", "No sales recorded today", "—", "—", "—", "—", "—"]],
+    foot: salesRows.length
+      ? [
+          [
+            "",
+            "TOTAL SALES",
+            `${sales.length} transactions`,
+            qtyTotalSummary,
+            "",
+            `Rs. ${formatRs(totalSalesBilled)}`,
+            `Rs. ${formatRs(totalSalesCash)}`,
+          ],
+        ]
+      : undefined,
     theme: "striped",
     headStyles: { fillColor: [40, 50, 60], fontSize: 7.5, cellPadding: 1.8 },
     bodyStyles: { fontSize: 7.2, cellPadding: 1.8 },
+    footStyles: {
+      fillColor: C_GOLD_LIGHT,
+      textColor: C_GREEN,
+      fontStyle: "bold",
+      fontSize: 7.5,
+      cellPadding: 2,
+    },
     columnStyles: {
       0: { cellWidth: 8, halign: "center" },
       1: { cellWidth: 45 },
@@ -1037,11 +1131,12 @@ export async function generateDayEndSupervisorSummaryPDF(params: DayEndReportPar
       5: { cellWidth: 22, halign: "right" },
       6: { cellWidth: 22, halign: "right" },
     },
-    margin: { left: m, right: m },
+    margin: { top: 18, bottom: 46, left: m, right: m },
   });
 
   const finalY = (doc as any).lastAutoTable?.finalY || y + 30;
   drawSupervisorFooter(doc, pw, ph, m, finalY);
+  addPageNumbers(doc, pw, ph, m);
 
   doc.save(`Day-End-Supervisor-Summary-${date}.pdf`);
 }

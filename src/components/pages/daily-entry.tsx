@@ -472,42 +472,36 @@ export default function DailyEntryPage() {
     try {
       toast.loading("Generating Complete Day-End Supervisor Summary…", { id: "pdf-day-summary-dl" });
 
-      // 1. Fetch all sales for this date
-      const allSales: any[] = [];
-      let sPage = 1;
-      let sTotalPages = 1;
-      while (sPage <= sTotalPages) {
-        const qs = new URLSearchParams({ sale_date: date, page: String(sPage), pageSize: "200" });
+      // 1. Fetch all sales for this date (unpaginated whole-day dataset)
+      let allSales: any[] = [];
+      try {
+        const qs = new URLSearchParams({ sale_date: date, pageSize: "all" });
         const res = await fetch(`/api/sales?${qs.toString()}`);
         if (res.ok) {
           const body = await res.json();
-          const rows = Array.isArray(body?.sales) ? body.sales : [];
-          allSales.push(...rows);
-          sTotalPages = body?.totalPages || 1;
-          if (rows.length === 0) break;
-        } else {
-          break;
+          allSales = Array.isArray(body?.sales) ? body.sales : [];
         }
-        sPage += 1;
+      } catch (err) {
+        console.error("Failed to fetch sales for day summary PDF:", err);
+      }
+      if (allSales.length === 0 && sales.length > 0) {
+        allSales = [...sales];
       }
 
       // 2. Fetch all customer payments for this date
-      const allPayments: any[] = [];
-      let cpP = 1;
-      let cpTotalP = 1;
-      while (cpP <= cpTotalP) {
-        const qs = new URLSearchParams({ payment_date: date, page: String(cpP), pageSize: "200" });
+      let allPayments: any[] = [];
+      try {
+        const qs = new URLSearchParams({ payment_date: date, pageSize: "all" });
         const res = await fetch(`/api/customer-payments?${qs.toString()}`);
         if (res.ok) {
           const body = await res.json();
-          const rows = Array.isArray(body?.rows) ? body.rows : [];
-          allPayments.push(...rows);
-          cpTotalP = body?.totalPages || 1;
-          if (rows.length === 0) break;
-        } else {
-          break;
+          allPayments = Array.isArray(body?.rows) ? body.rows : Array.isArray(body?.payments) ? body.payments : [];
         }
-        cpP += 1;
+      } catch (err) {
+        console.error("Failed to fetch customer payments for day summary PDF:", err);
+      }
+      if (allPayments.length === 0 && customerPayments.length > 0) {
+        allPayments = [...customerPayments];
       }
 
       // 3. Fetch purchases
