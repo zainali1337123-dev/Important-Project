@@ -31,6 +31,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -62,6 +63,9 @@ import {
   Pencil,
   FileText,
   Lock,
+  DollarSign,
+  Banknote,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import ConfirmAction from "@/components/shared/confirm-action";
@@ -145,12 +149,11 @@ export default function DailyEntryPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [customerPayments, setCustomerPayments] = useState<CustomerPayment[]>([]);
 
-  // ── Today's Sales: server-side customer-name search + pagination ──
+  // ── Today's Sales: client-side search + optional page size (default: "all") ──
   const [salesSearchInput, setSalesSearchInput] = useState("");
-  const [salesSearchDebounced, setSalesSearchDebounced] = useState("");
+  const [salesPageSize, setSalesPageSize] = useState<"all" | "25" | "50" | "100">("all");
   const [salesPage, setSalesPage] = useState(1);
   const [salesTotal, setSalesTotal] = useState(0);
-  const [salesTotalPages, setSalesTotalPages] = useState(1);
   const [downloadingSalesExcel, setDownloadingSalesExcel] = useState(false);
   const [downloadingSalesPdf, setDownloadingSalesPdf] = useState(false);
   const [downloadingDaySummaryPdf, setDownloadingDaySummaryPdf] = useState(false);
@@ -159,15 +162,6 @@ export default function DailyEntryPage() {
   // Cached locations list for rendering location badges on each sale row
   // (cheaper than re-querying per row).
   const [locationsList, setLocationsList] = useState<{id: number; name: string}[]>([]);
-
-  // Debounce search input by 350ms + reset to page 1 on new search
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setSalesSearchDebounced(salesSearchInput);
-      setSalesPage(1);
-    }, 350);
-    return () => clearTimeout(t);
-  }, [salesSearchInput]);
 
   // Bumped after every successful sale / mix-order / expense delete so the
   // <AvailableStock> panel knows to refetch stock automatically.
@@ -225,7 +219,7 @@ export default function DailyEntryPage() {
       setEditSaleOpen(false);
       setEditSaleTarget(null);
       // Refresh the day's data so the table shows updated values.
-      await loadDayData(date, salesSearchDebounced, salesPage, salesLocationFilter);
+      await loadDayData(date, salesLocationFilter);
       invalidateCache("stock");
       invalidateCache("customers");
       setStockRefreshTrigger((n) => n + 1);
@@ -266,21 +260,18 @@ export default function DailyEntryPage() {
     if (errors.length > 0) toast.error(`Failed to load: ${errors.join(", ")}`);
   }, []);
 
-  const loadDayData = useCallback(async (d: string, customerName = "", page = 1, locationFilter: number = 0) => {
+  const loadDayData = useCallback(async (d: string, locationFilter: number = 0) => {
     const bust = `_t=${Date.now()}`;
     try {
-      const params = new URLSearchParams({ sale_date: d, _t: bust });
-      if (customerName.trim()) params.set("customer_name", customerName.trim());
-      params.set("page", String(page));
-      params.set("pageSize", "10");
+      const params = new URLSearchParams({ sale_date: d, _t: bust, pageSize: "all" });
       // 0 = All Locations (don't send location_id), 1/2 = specific location filter
       if (locationFilter && locationFilter > 0) params.set("location_id", String(locationFilter));
       const sRes = await fetch(`/api/sales?${params.toString()}`);
       if (sRes.ok) {
         const sData = await sRes.json();
-        setSales(sData.sales ?? []);
-        setSalesTotal(sData.total ?? 0);
-        setSalesTotalPages(sData.totalPages ?? 1);
+        const rows = Array.isArray(sData.sales) ? sData.sales : [];
+        setSales(rows);
+        setSalesTotal(typeof sData.total === "number" ? sData.total : rows.length);
       }
       else toast.error("Failed to load sales");
     } catch { toast.error("Failed to load sales"); }
@@ -336,10 +327,10 @@ export default function DailyEntryPage() {
     })();
   }, []);
 
-  // Refetch sales when date, search, page, or location filter changes
+  // Refetch sales when date or location filter changes
   useEffect(() => {
-    loadDayData(date, salesSearchDebounced, salesPage, salesLocationFilter);
-  }, [date, salesSearchDebounced, salesPage, salesLocationFilter, loadDayData]);
+    loadDayData(date, salesLocationFilter);
+  }, [date, salesLocationFilter, loadDayData]);
 
   // Refetch customer payments when date, search, or page changes
   useEffect(() => {
@@ -1141,12 +1132,36 @@ export default function DailyEntryPage() {
     }
   };
 
-  const regularSales = sales.filter((s) => !s.mix_order_id);
-  const mixSales = sales.filter((s) => !!s.mix_order_id);
+  // Filter sales by customer name or product name or rickshaw driver
+  const filteredSales = useMemo(() => {
+    if (!salesSearchInput.trim()) return sales;
+    const q = salesSearchInput.toLowerCase().trim();
+    return sales.filter((s) => {
+      const custName = (s.customers?.name || "").toLowerCase();
+      const prodName = (s.products?.name || "").toLowerCase();
+      const driver = (s.rickshaw_driver_name || "").toLowerCase();
+      return custName.includes(q) || prodName.includes(q) || driver.includes(q);
+    });
+  }, [sales, salesSearchInput]);
+
+  const regularSales = useMemo(() => filteredSales.filter((s) => !s.mix_order_id), [filteredSales]);
+  const mixSales = useMemo(() => filteredSales.filter((s) => !!s.mix_order_id), [filteredSales]);
+
+  const regularSalesTotalPages = useMemo(() => {
+    if (salesPageSize === "all") return 1;
+    const size = Number(salesPageSize) || 25;
+    return Math.max(1, Math.ceil(regularSales.length / size));
+  }, [regularSales.length, salesPageSize]);
+
+  const pagedRegularSales = useMemo(() => {
+    if (salesPageSize === "all") return regularSales;
+    const size = Number(salesPageSize) || 25;
+    const start = (salesPage - 1) * size;
+    return regularSales.slice(start, start + size);
+  }, [regularSales, salesPageSize, salesPage]);
 
   const mixGroups = useMemo(() => {
     // Group by mix_order_id (DB foreign key — unique per mix order)
-    // NOT by transaction_group_id which can be shared across different orders
     const map = new Map<string, Sale[]>();
     for (const s of mixSales) {
       const key = s.mix_order_id != null ? String(s.mix_order_id) : `mix-${s.id}`;
@@ -1156,7 +1171,76 @@ export default function DailyEntryPage() {
     return map;
   }, [mixSales]);
 
-  const totalCashIn = sales.reduce((sum, s) => sum + s.cash_received, 0);
+  // Aggregated totals for regular sales table footer
+  const totalRegularQty = useMemo(
+    () => regularSales.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0),
+    [regularSales],
+  );
+  const totalRegularRickshaw = useMemo(
+    () => regularSales.reduce((sum, s) => sum + (Number(s.rickshaw_fare) || 0), 0),
+    [regularSales],
+  );
+  const totalRegularBill = useMemo(
+    () =>
+      regularSales.reduce(
+        (sum, s) =>
+          sum +
+          (Number(s.quantity) || 0) * (Number(s.rate_per_bag) || 0) +
+          (Number(s.rickshaw_fare) || 0),
+        0,
+      ),
+    [regularSales],
+  );
+  const totalRegularCash = useMemo(
+    () => regularSales.reduce((sum, s) => sum + (Number(s.cash_received) || 0), 0),
+    [regularSales],
+  );
+  const totalRegularRemaining = totalRegularBill - totalRegularCash;
+
+  // Aggregated totals for mix orders table footer
+  const totalMixQtySum = useMemo(() => {
+    let sum = 0;
+    for (const lines of mixGroups.values()) {
+      sum += lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+    }
+    return sum;
+  }, [mixGroups]);
+  const totalMixBillSum = useMemo(() => {
+    let sum = 0;
+    for (const lines of mixGroups.values()) {
+      sum += lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.rate_per_bag) || 0), 0);
+    }
+    return sum;
+  }, [mixGroups]);
+  const totalMixCashSum = useMemo(() => {
+    let sum = 0;
+    for (const lines of mixGroups.values()) {
+      sum += lines.reduce((s, l) => s + (Number(l.cash_received) || 0), 0);
+    }
+    return sum;
+  }, [mixGroups]);
+  const totalMixRemainingSum = totalMixBillSum - totalMixCashSum;
+
+  // True whole-day totals summarizing the entire active date/location dataset
+  const daySalesTotals = useMemo(() => {
+    let totalBilled = 0;
+    let cashCollected = 0;
+    for (const s of sales) {
+      const bill = (Number(s.quantity) || 0) * (Number(s.rate_per_bag) || 0) + (Number(s.rickshaw_fare) || 0);
+      totalBilled += bill;
+      cashCollected += (Number(s.cash_received) || 0);
+    }
+    const creditOutstanding = Math.max(0, totalBilled - cashCollected);
+    const totalTransactions = sales.length;
+    return {
+      totalTransactions,
+      totalBilled,
+      cashCollected,
+      creditOutstanding,
+    };
+  }, [sales]);
+
+  const totalCashIn = daySalesTotals.cashCollected;
   const totalExpensesAmt = expenses.reduce((sum, e) => sum + e.amount, 0);
 
   // ── Today's Expenses: client-side pagination + description search ──
@@ -1836,20 +1920,47 @@ export default function DailyEntryPage() {
                     className="h-9 w-[140px]"
                   />
                 </div>
+                {/* Rows per page selector: All / 25 / 50 / 100 */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs uppercase text-slate-500 font-semibold whitespace-nowrap">Show:</span>
+                  <Select
+                    value={salesPageSize}
+                    onValueChange={(v) => {
+                      setSalesPageSize(v as "all" | "25" | "50" | "100");
+                      setSalesPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-[115px] text-xs">
+                      <SelectValue placeholder="All rows" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All ({sales.length})</SelectItem>
+                      <SelectItem value="25">25 rows</SelectItem>
+                      <SelectItem value="50">50 rows</SelectItem>
+                      <SelectItem value="100">100 rows</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
                   <Input
                     value={salesSearchInput}
-                    onChange={(e) => setSalesSearchInput(e.target.value)}
+                    onChange={(e) => {
+                      setSalesSearchInput(e.target.value);
+                      setSalesPage(1);
+                    }}
                     placeholder="Search by customer name..."
-                    className="pl-8 w-full sm:w-64 h-9"
+                    className="pl-8 w-full sm:w-60 h-9"
                   />
                   {salesSearchInput && (
                     <Button
                       variant="ghost"
                       size="sm"
                       className="absolute right-1 top-1/2 -translate-y-1/2 h-7 px-2 text-slate-400"
-                      onClick={() => setSalesSearchInput("")}
+                      onClick={() => {
+                        setSalesSearchInput("");
+                        setSalesPage(1);
+                      }}
                     >
                       Clear
                     </Button>
@@ -1888,51 +1999,61 @@ export default function DailyEntryPage() {
           </CardHeader>
           <CardContent>
             {sales.length === 0 ? (
-              <p className="text-sm text-slate-400 py-4 text-center">
-                {salesSearchDebounced.trim()
-                  ? `No record for the customer "${salesSearchDebounced}".`
-                  : salesLocationFilter > 0
-                    ? `No sales at ${locationsList.find((l) => l.id === salesLocationFilter)?.name ?? "this location"} for this date.`
-                    : "No sales entered yet for this date."}
+              <p className="text-sm text-slate-400 py-6 text-center">
+                {salesLocationFilter > 0
+                  ? `No sales at ${locationsList.find((l) => l.id === salesLocationFilter)?.name ?? "this location"} for this date.`
+                  : "No sales entered yet for this date."}
+              </p>
+            ) : filteredSales.length === 0 ? (
+              <p className="text-sm text-slate-400 py-6 text-center">
+                No sales record matching &ldquo;{salesSearchInput}&rdquo;.
               </p>
             ) : (
               <div className="space-y-6">
                 {regularSales.length > 0 && (
                   <div>
-                    <h3 className="text-sm font-bold text-slate-700 mb-2">Regular Sales</h3>
-                    <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-200/60">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-bold text-slate-700">
+                        Regular Sales ({regularSales.length})
+                      </h3>
+                      {salesSearchInput.trim() && (
+                        <span className="text-xs text-slate-500">
+                          Matching &ldquo;{salesSearchInput.trim()}&rdquo;
+                        </span>
+                      )}
+                    </div>
+                    <div className="max-h-[600px] overflow-y-auto rounded-lg border border-slate-200/60 shadow-inner relative">
                       <Table>
-                        <TableHeader>
-                          <TableRow className="bg-slate-50">
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold">Customer</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold">Type</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold">Location</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold hidden lg:table-cell">Product</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Qty</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right hidden sm:table-cell">Rate</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right hidden md:table-cell">Rickshaw</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Bill</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right hidden sm:table-cell">Cash</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right hidden lg:table-cell">Remaining</TableHead>
-                            <TableHead className="w-20">Actions</TableHead>
+                        <TableHeader className="sticky top-0 bg-slate-100 z-10 shadow-sm">
+                          <TableRow className="bg-slate-100 hover:bg-slate-100 border-b border-slate-200">
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold bg-slate-100">Customer</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold bg-slate-100">Type</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold bg-slate-100">Location</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold hidden lg:table-cell bg-slate-100">Product</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold text-right bg-slate-100">Qty</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold text-right hidden sm:table-cell bg-slate-100">Rate</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold text-right hidden md:table-cell bg-slate-100">Rickshaw</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold text-right bg-slate-100">Bill</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold text-right hidden sm:table-cell bg-slate-100">Cash</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold text-right hidden lg:table-cell bg-slate-100">Remaining</TableHead>
+                            <TableHead className="w-20 bg-slate-100">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {regularSales.map((s) => {
+                          {pagedRegularSales.map((s) => {
                             const bill = s.quantity * s.rate_per_bag + s.rickshaw_fare;
                             const remaining = bill - s.cash_received;
                             const unitSuffix = s.unit_type === "kg" ? " kg" : "";
-                            // Resolve location name from cached list — fall back
-                            // to a generic "Loc #N" label if the list hasn't
-                            // loaded yet (shouldn't happen in practice).
                             const locName = locationsList.find((l) => l.id === s.location_id)?.name
                               ?? (s.location_id ? `Loc #${s.location_id}` : "—");
                             const isFarmhouse = s.location_id === 1;
                             return (
-                              <TableRow key={s.id}>
+                              <TableRow key={s.id} className="hover:bg-slate-50/70">
                                 <TableCell className="text-sm font-medium">{s.customers?.name ?? "—"}</TableCell>
                                 <TableCell>
-                                  <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", s.customers?.type === "credit" ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800")}>{s.customers?.type ?? "—"}</span>
+                                  <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", s.customers?.type === "credit" ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800")}>
+                                    {s.customers?.type ?? "—"}
+                                  </span>
                                 </TableCell>
                                 <TableCell>
                                   <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", isFarmhouse ? "bg-indigo-100 text-indigo-800" : "bg-blue-100 text-blue-800")} title={`This sale was recorded at ${locName}`}>
@@ -1940,12 +2061,12 @@ export default function DailyEntryPage() {
                                   </span>
                                 </TableCell>
                                 <TableCell className="text-sm hidden lg:table-cell">{s.products?.name ?? "—"}</TableCell>
-                                <TableCell className="text-sm text-right">{fmt(s.quantity)}{unitSuffix}</TableCell>
-                                <TableCell className="text-sm text-right hidden sm:table-cell">{fmt(s.rate_per_bag)}</TableCell>
-                                <TableCell className="text-sm text-right hidden md:table-cell">{s.rickshaw_fare > 0 ? fmt(s.rickshaw_fare) : "—"}{s.rickshaw_driver_name && <span className="block text-xs text-slate-400"><Truck className="inline size-3" /> {s.rickshaw_driver_name}</span>}</TableCell>
-                                <TableCell className="text-sm text-right font-semibold">{fmt(bill)}</TableCell>
-                                <TableCell className="text-sm text-right hidden sm:table-cell">{s.cash_received > 0 ? fmt(s.cash_received) : "—"}</TableCell>
-                                <TableCell className={cn("text-sm text-right font-semibold hidden lg:table-cell", remaining > 0 ? "text-red-600" : "text-green-600")}>{fmt(remaining)}</TableCell>
+                                <TableCell className="text-sm text-right tabular-nums">{fmt(s.quantity)}{unitSuffix}</TableCell>
+                                <TableCell className="text-sm text-right tabular-nums hidden sm:table-cell">{fmt(s.rate_per_bag)}</TableCell>
+                                <TableCell className="text-sm text-right tabular-nums hidden md:table-cell">{s.rickshaw_fare > 0 ? fmt(s.rickshaw_fare) : "—"}{s.rickshaw_driver_name && <span className="block text-xs text-slate-400"><Truck className="inline size-3" /> {s.rickshaw_driver_name}</span>}</TableCell>
+                                <TableCell className="text-sm text-right tabular-nums font-semibold">{fmt(bill)}</TableCell>
+                                <TableCell className="text-sm text-right tabular-nums hidden sm:table-cell">{s.cash_received > 0 ? fmt(s.cash_received) : "—"}</TableCell>
+                                <TableCell className={cn("text-sm text-right tabular-nums font-semibold hidden lg:table-cell", remaining > 0 ? "text-red-600" : "text-green-600")}>{fmt(remaining)}</TableCell>
                                 <TableCell>
                                   <div className="flex items-center gap-0.5">
                                     <Button variant="ghost" size="icon" className="size-7 text-slate-400 hover:text-blue-600" onClick={() => handleEditSale(s)} title="Edit sale">
@@ -1960,6 +2081,31 @@ export default function DailyEntryPage() {
                             );
                           })}
                         </TableBody>
+                        <TableFooter className="sticky bottom-0 bg-slate-100/95 backdrop-blur font-bold border-t-2 border-slate-300 z-10">
+                          <TableRow className="hover:bg-slate-100">
+                            <TableCell colSpan={3} className="text-xs uppercase tracking-wider text-slate-700 bg-slate-100 font-bold">
+                              Total ({regularSales.length} {regularSales.length === 1 ? "Sale" : "Sales"})
+                            </TableCell>
+                            <TableCell className="hidden lg:table-cell bg-slate-100" />
+                            <TableCell className="text-sm text-right tabular-nums text-slate-900 font-bold bg-slate-100">
+                              {fmt(totalRegularQty)}
+                            </TableCell>
+                            <TableCell className="hidden sm:table-cell text-right text-slate-400 font-normal bg-slate-100">—</TableCell>
+                            <TableCell className="hidden md:table-cell text-right tabular-nums text-slate-700 bg-slate-100">
+                              {totalRegularRickshaw > 0 ? fmt(totalRegularRickshaw) : "—"}
+                            </TableCell>
+                            <TableCell className="text-sm text-right tabular-nums text-slate-900 font-extrabold bg-slate-100">
+                              Rs. {fmt(totalRegularBill)}
+                            </TableCell>
+                            <TableCell className="hidden sm:table-cell text-sm text-right tabular-nums text-emerald-700 font-bold bg-slate-100">
+                              Rs. {fmt(totalRegularCash)}
+                            </TableCell>
+                            <TableCell className={cn("hidden lg:table-cell text-sm text-right tabular-nums font-extrabold bg-slate-100", totalRegularRemaining > 0 ? "text-red-600" : "text-emerald-600")}>
+                              Rs. {fmt(totalRegularRemaining)}
+                            </TableCell>
+                            <TableCell className="bg-slate-100" />
+                          </TableRow>
+                        </TableFooter>
                       </Table>
                     </div>
                   </div>
@@ -1968,21 +2114,28 @@ export default function DailyEntryPage() {
                 {mixGroups.size > 0 && (
                   <div>
                     <Separator className="my-2" />
-                    <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-1.5">
-                      <Beaker className="size-4 text-purple-500" /> Mix Orders
-                    </h3>
-                    <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-200/60">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                        <Beaker className="size-4 text-purple-500" /> Mix Orders ({mixGroups.size})
+                      </h3>
+                      {salesSearchInput.trim() && (
+                        <span className="text-xs text-slate-500">
+                          Matching &ldquo;{salesSearchInput.trim()}&rdquo;
+                        </span>
+                      )}
+                    </div>
+                    <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-200/60 shadow-inner relative">
                       <Table>
-                        <TableHeader>
-                          <TableRow className="bg-slate-50">
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold">Customer</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold">Order</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold">Location</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Total Qty</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right hidden md:table-cell">Total Bill</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right hidden md:table-cell">Cash</TableHead>
-                            <TableHead className="text-xs uppercase text-slate-500 font-semibold text-right">Remaining</TableHead>
-                            <TableHead className="w-10" />
+                        <TableHeader className="sticky top-0 bg-slate-100 z-10 shadow-sm">
+                          <TableRow className="bg-slate-100 hover:bg-slate-100 border-b border-slate-200">
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold bg-slate-100">Customer</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold bg-slate-100">Order</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold bg-slate-100">Location</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold text-right bg-slate-100">Total Qty</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold text-right hidden md:table-cell bg-slate-100">Total Bill</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold text-right hidden md:table-cell bg-slate-100">Cash</TableHead>
+                            <TableHead className="text-xs uppercase text-slate-600 font-semibold text-right bg-slate-100">Remaining</TableHead>
+                            <TableHead className="w-10 bg-slate-100" />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1994,16 +2147,13 @@ export default function DailyEntryPage() {
                             const mixRemaining = totalMixBill - totalMixCash;
                             const isExpanded = expandedMix.has(mixOrderId);
                             const groupId = mixOrderId;
-                            // Mix order location — all lines share the same
-                            // location_id (it's set at order level), so we read
-                            // it from the first line.
                             const mixLocId = lines[0]?.location_id;
                             const mixLocName = locationsList.find((l) => l.id === mixLocId)?.name
                               ?? (mixLocId ? `Loc #${mixLocId}` : "—");
                             const isMixFarmhouse = mixLocId === 1;
 
                             return (
-                              <TableRow key={mixOrderId}>
+                              <TableRow key={mixOrderId} className="hover:bg-slate-50/70">
                                 <TableCell className="font-medium text-sm">
                                   <Collapsible open={isExpanded} onOpenChange={() => toggleMix(mixOrderId)}>
                                     <CollapsibleTrigger className="flex items-center gap-1 text-left hover:underline">
@@ -2025,9 +2175,9 @@ export default function DailyEntryPage() {
                                             {lines.map((l) => (
                                               <TableRow key={l.id} className="bg-transparent hover:bg-purple-100/50 border-0">
                                                 <TableCell className="py-1 text-sm">{l.products?.name}</TableCell>
-                                                <TableCell className="py-1 text-sm text-right">{fmt(l.quantity)}</TableCell>
-                                                <TableCell className="py-1 text-sm text-right">{fmt(l.rate_per_bag)}</TableCell>
-                                                <TableCell className="py-1 text-sm text-right font-medium">{fmt(l.quantity * l.rate_per_bag)}</TableCell>
+                                                <TableCell className="py-1 text-sm text-right tabular-nums">{fmt(l.quantity)}</TableCell>
+                                                <TableCell className="py-1 text-sm text-right tabular-nums">{fmt(l.rate_per_bag)}</TableCell>
+                                                <TableCell className="py-1 text-sm text-right tabular-nums font-medium">{fmt(l.quantity * l.rate_per_bag)}</TableCell>
                                               </TableRow>
                                             ))}
                                           </TableBody>
@@ -2046,10 +2196,10 @@ export default function DailyEntryPage() {
                                     {mixLocName}
                                   </span>
                                 </TableCell>
-                                <TableCell className="text-sm text-right">{fmt(totalQty)} kg</TableCell>
-                                <TableCell className="text-sm text-right font-semibold hidden md:table-cell">{fmt(totalMixBill)}</TableCell>
-                                <TableCell className="text-sm text-right hidden md:table-cell">{totalMixCash > 0 ? fmt(totalMixCash) : "—"}</TableCell>
-                                <TableCell className={cn("text-sm text-right font-semibold", mixRemaining > 0 ? "text-red-600" : "text-green-600")}>{fmt(mixRemaining)}</TableCell>
+                                <TableCell className="text-sm text-right tabular-nums">{fmt(totalQty)} kg</TableCell>
+                                <TableCell className="text-sm text-right tabular-nums font-semibold hidden md:table-cell">{fmt(totalMixBill)}</TableCell>
+                                <TableCell className="text-sm text-right tabular-nums hidden md:table-cell">{totalMixCash > 0 ? fmt(totalMixCash) : "—"}</TableCell>
+                                <TableCell className={cn("text-sm text-right tabular-nums font-semibold", mixRemaining > 0 ? "text-red-600" : "text-green-600")}>{fmt(mixRemaining)}</TableCell>
                                 <TableCell>
                                   <Button variant="ghost" size="icon" className="size-7 text-slate-400 hover:text-red-600" onClick={() => handleDeleteMixOrder(groupId)}>
                                     <Trash2 className="size-3.5" />
@@ -2059,61 +2209,133 @@ export default function DailyEntryPage() {
                             );
                           })}
                         </TableBody>
+                        <TableFooter className="sticky bottom-0 bg-slate-100/95 backdrop-blur font-bold border-t-2 border-slate-300 z-10">
+                          <TableRow className="hover:bg-slate-100">
+                            <TableCell colSpan={3} className="text-xs uppercase tracking-wider text-slate-700 bg-slate-100 font-bold">
+                              Total ({mixGroups.size} {mixGroups.size === 1 ? "Mix Order" : "Mix Orders"})
+                            </TableCell>
+                            <TableCell className="text-sm text-right tabular-nums text-slate-900 font-bold bg-slate-100">
+                              {fmt(totalMixQtySum)} kg
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell text-sm text-right tabular-nums text-slate-900 font-extrabold bg-slate-100">
+                              Rs. {fmt(totalMixBillSum)}
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell text-sm text-right tabular-nums text-emerald-700 font-bold bg-slate-100">
+                              Rs. {fmt(totalMixCashSum)}
+                            </TableCell>
+                            <TableCell className={cn("text-sm text-right tabular-nums font-extrabold bg-slate-100", totalMixRemainingSum > 0 ? "text-red-600" : "text-emerald-600")}>
+                              Rs. {fmt(totalMixRemainingSum)}
+                            </TableCell>
+                            <TableCell className="bg-slate-100" />
+                          </TableRow>
+                        </TableFooter>
                       </Table>
                     </div>
                   </div>
                 )}
 
+                {/* Whole-Day Summary Cards */}
                 {sales.length > 0 && (
-                  <div className="flex flex-wrap gap-3 pt-2">
-                    <div className="flex-1 min-w-[140px] rounded-lg bg-slate-50 border border-slate-200/60 px-3 py-2 text-center">
-                      <div className="text-xs text-slate-500 font-semibold uppercase">Items On Page</div>
-                      <div className="text-lg font-extrabold text-slate-900">{fmt(sales.length)}</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+                    <div className="rounded-xl bg-slate-50 border border-slate-200/70 p-3.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Transactions</span>
+                        <Receipt className="size-4 text-slate-400" />
+                      </div>
+                      <div className="mt-1 text-2xl font-extrabold text-slate-900 tabular-nums">
+                        {fmt(daySalesTotals.totalTransactions)}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-slate-500 font-medium">
+                        All sales recorded for {date}
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-[140px] rounded-lg bg-slate-50 border border-slate-200/60 px-3 py-2 text-center">
-                      <div className="text-xs text-slate-500 font-semibold uppercase">Total Records</div>
-                      <div className="text-lg font-extrabold text-slate-900">{fmt(salesTotal)}</div>
+
+                    <div className="rounded-xl bg-slate-50 border border-slate-200/70 p-3.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Billed</span>
+                        <DollarSign className="size-4 text-blue-500" />
+                      </div>
+                      <div className="mt-1 text-2xl font-extrabold text-slate-900 tabular-nums">
+                        Rs. {fmt(daySalesTotals.totalBilled)}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-slate-500 font-medium">
+                        Full day gross sales (incl. freight)
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-[140px] rounded-lg bg-slate-50 border border-slate-200/60 px-3 py-2 text-center">
-                      <div className="text-xs text-slate-500 font-semibold uppercase">Total Billed (page)</div>
-                      <div className="text-lg font-extrabold text-slate-900">Rs. {fmt(sales.reduce((sum, s) => sum + s.quantity * s.rate_per_bag + s.rickshaw_fare, 0))}</div>
+
+                    <div className="rounded-xl bg-emerald-50/70 border border-emerald-200/80 p-3.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-emerald-800 uppercase tracking-wider">Cash Collected</span>
+                        <Banknote className="size-4 text-emerald-600" />
+                      </div>
+                      <div className="mt-1 text-2xl font-extrabold text-emerald-700 tabular-nums">
+                        Rs. {fmt(daySalesTotals.cashCollected)}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-emerald-700/80 font-medium">
+                        Spot cash collected today
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-[140px] rounded-lg bg-slate-50 border border-slate-200/60 px-3 py-2 text-center">
-                      <div className="text-xs text-slate-500 font-semibold uppercase">Cash Collected (page)</div>
-                      <div className="text-lg font-extrabold text-green-600">Rs. {fmt(totalCashIn)}</div>
+
+                    <div className={cn("rounded-xl p-3.5 shadow-sm border", daySalesTotals.creditOutstanding > 0 ? "bg-amber-50/70 border-amber-200/80" : "bg-slate-50 border-slate-200/70")}>
+                      <div className="flex items-center justify-between">
+                        <span className={cn("text-xs font-semibold uppercase tracking-wider", daySalesTotals.creditOutstanding > 0 ? "text-amber-800" : "text-slate-500")}>
+                          Credit Outstanding Today
+                        </span>
+                        <Clock className={cn("size-4", daySalesTotals.creditOutstanding > 0 ? "text-amber-600" : "text-slate-400")} />
+                      </div>
+                      <div className={cn("mt-1 text-2xl font-extrabold tabular-nums", daySalesTotals.creditOutstanding > 0 ? "text-amber-900" : "text-slate-700")}>
+                        Rs. {fmt(daySalesTotals.creditOutstanding)}
+                      </div>
+                      <div className={cn("mt-0.5 text-[11px] font-medium", daySalesTotals.creditOutstanding > 0 ? "text-amber-700/80" : "text-slate-500")}>
+                        {daySalesTotals.creditOutstanding > 0 ? "Total credit billed today" : "All sales cleared in cash"}
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* Pagination controls for Today's Sales */}
-                {salesTotal > 0 && (
-                  <div className="flex items-center justify-end gap-3 pt-2">
-                    <span className="text-xs text-slate-500">
-                      Page {salesPage} of {salesTotalPages}
-                      {" · "}
-                      {salesTotal} records
-                      {salesSearchDebounced.trim() ? ` matching "${salesSearchDebounced}"` : ""}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={salesPage <= 1}
-                        onClick={() => setSalesPage((p) => Math.max(1, p - 1))}
-                      >
-                        <ChevronLeft className="size-4" />
-                        Prev
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={salesPage >= salesTotalPages}
-                        onClick={() => setSalesPage((p) => p + 1)}
-                      >
-                        Next
-                        <ChevronRight className="size-4" />
-                      </Button>
+                {/* Row counter & pagination controls if a page size is selected */}
+                {filteredSales.length > 0 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 text-xs text-slate-500 border-t border-slate-100">
+                    <div>
+                      {salesPageSize === "all" ? (
+                        <span>
+                          Showing <strong>all {filteredSales.length}</strong> records
+                          {salesSearchInput.trim() ? ` matching "${salesSearchInput.trim()}"` : ""}
+                          {" · "}Scroll the table to inspect all records
+                        </span>
+                      ) : (
+                        <span>
+                          Page <strong>{salesPage}</strong> of <strong>{regularSalesTotalPages}</strong>
+                          {" · "}Showing {(salesPage - 1) * Number(salesPageSize) + 1}–{Math.min(salesPage * Number(salesPageSize), regularSales.length)} of {regularSales.length} regular sales
+                          {salesSearchInput.trim() ? ` matching "${salesSearchInput.trim()}"` : ""}
+                        </span>
+                      )}
                     </div>
+
+                    {salesPageSize !== "all" && regularSalesTotalPages > 1 && (
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={salesPage <= 1}
+                          onClick={() => setSalesPage((p) => Math.max(1, p - 1))}
+                          className="h-8 px-3"
+                        >
+                          <ChevronLeft className="size-4 mr-1" />
+                          Prev
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={salesPage >= regularSalesTotalPages}
+                          onClick={() => setSalesPage((p) => p + 1)}
+                          className="h-8 px-3"
+                        >
+                          Next
+                          <ChevronRight className="size-4 ml-1" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

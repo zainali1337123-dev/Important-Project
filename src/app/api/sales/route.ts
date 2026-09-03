@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
       query = query.eq("location_id", locationId);
     }
 
-    if (page && pageSize) {
+    if (page && pageSize && pageSize !== "all" && pageSize !== "0") {
       const p = Number(page) || 1;
       const ps = Number(pageSize) || 20;
       const fromIdx = (p - 1) * ps;
