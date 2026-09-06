@@ -62,6 +62,7 @@ interface CustomerForm {
   phone: string;
   type: "credit" | "cash";
   opening_balance: string;
+  advance_payment: string;
   credit_limit: string;
   is_active: boolean;
 }
@@ -71,6 +72,7 @@ const emptyForm: CustomerForm = {
   phone: "",
   type: "credit",
   opening_balance: "0",
+  advance_payment: "0",
   credit_limit: "3000000",
   is_active: true,
 };
@@ -179,6 +181,7 @@ export default function ManageCustomersPage() {
           type: addForm.type,
           phone: addForm.phone.trim() || null,
           opening_balance: parseFloat(addForm.opening_balance) || 0,
+          advance_payment: parseFloat(addForm.advance_payment) || 0,
           credit_limit: parseFloat(addForm.credit_limit) >= 0 ? parseFloat(addForm.credit_limit) : 3000000,
         }),
       });
@@ -208,6 +211,7 @@ export default function ManageCustomersPage() {
       phone: c.phone ?? "",
       type: c.type as "credit" | "cash",
       opening_balance: String(c.opening_balance ?? 0),
+      advance_payment: String(c.advance_payment ?? 0),
       credit_limit: String(c.credit_limit ?? 3000000),
       is_active: c.is_active,
     });
@@ -230,6 +234,7 @@ export default function ManageCustomersPage() {
           type: editForm.type,
           phone: editForm.phone.trim() || null,
           opening_balance: parseFloat(editForm.opening_balance) || 0,
+          advance_payment: parseFloat(editForm.advance_payment) || 0,
           credit_limit: parseFloat(editForm.credit_limit) >= 0 ? parseFloat(editForm.credit_limit) : 3000000,
           is_active: editForm.is_active,
         }),
@@ -949,7 +954,7 @@ function CustomerFormFields({
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-slate-700">
               Opening Balance (Rs.) <span className="font-normal text-slate-400">— purana balance</span>
@@ -964,11 +969,46 @@ function CustomerFormFields({
               className="h-10"
             />
             <p className="text-[11px] text-slate-500 leading-tight">
-              Customer ka purana balance (system se pehle ke sales). Khata me <strong>opening balance</strong> save hoga.
+              Purana balance. Khata me <strong>opening balance</strong> save hoga.
             </p>
             {parseFloat(form.opening_balance) > 0 && (
               <p className="text-[0.68rem] text-emerald-700 font-medium capitalize bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
                 {numberToWords(parseFloat(form.opening_balance) || 0)}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold text-slate-700">
+                Advance Payment (Rs.) <span className="font-normal text-slate-400">— پیشگی</span>
+              </Label>
+              {parseFloat(form.advance_payment) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, advance_payment: "0" })}
+                  className="text-[10px] font-bold text-rose-600 hover:text-rose-800 underline cursor-pointer"
+                  title="Advance balance khatam karein"
+                >
+                  Clear (Reset 0)
+                </button>
+              )}
+            </div>
+            <Input
+              type="number"
+              min="0"
+              step="100"
+              placeholder="0"
+              value={form.advance_payment}
+              onChange={(e) => setForm({ ...form, advance_payment: e.target.value })}
+              className="h-10"
+            />
+            <p className="text-[11px] text-slate-500 leading-tight">
+              Customer advance. Agar ghalti se add hua ho toh yahan se <strong>0</strong> karein.
+            </p>
+            {parseFloat(form.advance_payment) > 0 && (
+              <p className="text-[0.68rem] text-emerald-700 font-medium capitalize bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                {numberToWords(parseFloat(form.advance_payment) || 0)}
               </p>
             )}
           </div>
@@ -987,7 +1027,7 @@ function CustomerFormFields({
               className="h-10"
             />
             <p className="text-[11px] text-slate-500 leading-tight">
-              Balance limit se exceed hoga toh dashboard par <strong>Over Credit Limit</strong> alert aayega.
+              Over Credit Limit alert trigger karne ke liye limit.
             </p>
             {parseFloat(form.credit_limit) > 0 && (
               <p className="text-[0.68rem] text-blue-700 font-medium capitalize bg-blue-50 px-2 py-0.5 rounded border border-blue-100">

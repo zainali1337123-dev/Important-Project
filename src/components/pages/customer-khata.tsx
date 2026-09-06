@@ -19,6 +19,7 @@ import {
   Truck,
   ShoppingBag,
   Wallet,
+  Trash2,
 } from "lucide-react";
 import {
   Select,
@@ -32,6 +33,8 @@ import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import ConfirmAction from "@/components/shared/confirm-action";
+import { invalidateCache, apiError } from "@/store";
 import { shareBillOnWhatsApp } from "@/lib/share-whatsapp";
 import { showWhatsAppShareToast } from "@/components/share-whatsapp-toast";
 import { numberToWords } from "@/lib/number-to-words";
@@ -41,6 +44,7 @@ import {
   useCustomerBalance,
   useSalesPaginated,
   useMixOrders,
+  useInvalidateAfterMutation,
 } from "@/hooks/queries";
 import { downloadExcel } from "@/lib/download-excel";
 
@@ -212,6 +216,11 @@ export default function CustomerKhataPage() {
   const [downloadingCustomers, setDownloadingCustomers] = useState(false);
   const [downloadingSales, setDownloadingSales] = useState(false);
 
+  // Invalidation after mutation
+  const invalidate = useInvalidateAfterMutation();
+  const [clearAdvanceOpen, setClearAdvanceOpen] = useState(false);
+  const [clearingAdvance, setClearingAdvance] = useState(false);
+
   // Toggle expand/collapse for a mix order group
   const toggleMixOrder = (mixOrderId: string) => {
     setExpandedMixOrders((prev) => {
@@ -272,6 +281,28 @@ export default function CustomerKhataPage() {
     () => (selectedCustomerId ? balances[Number(selectedCustomerId)] ?? null : null),
     [selectedCustomerId, balances],
   );
+
+  const handleRemoveAdvance = async () => {
+    if (!selectedCustomer) return;
+    setClearingAdvance(true);
+    try {
+      const res = await fetch("/api/customers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selectedCustomer.id, advance_payment: 0 }),
+      });
+      if (!res.ok) throw new Error(await apiError(res, "Failed to remove advance payment"));
+      invalidateCache("customers");
+      invalidate.invalidateCustomers();
+      invalidate.invalidateCustomerBalance();
+      toast.success(`Advance payment removed for ${selectedCustomer.name}. Reset to Rs. 0.`);
+      setClearAdvanceOpen(false);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to remove advance payment");
+    } finally {
+      setClearingAdvance(false);
+    }
+  };
 
   const pagedSales: Sale[] = useMemo(
     () => (salesQ.data?.sales ?? []) as Sale[],
@@ -1363,7 +1394,24 @@ export default function CustomerKhataPage() {
                 <MetricCard label="Cash Paid" value={fmt(selectedBalance.total_cash_paid)} color="green" prefix="Rs. " words={numberToWords(selectedBalance.total_cash_paid)} />
                 <MetricCard label="Paid in Goods" value={fmt(selectedBalance.total_goods_value)} color="purple" prefix="Rs. " words={numberToWords(selectedBalance.total_goods_value)} />
                 {Number(selectedBalance.advance_payment) > 0 && (
-                  <MetricCard label="Advance Payment" value={fmt(selectedBalance.advance_payment)} color="green" prefix="Rs. " words={numberToWords(Number(selectedBalance.advance_payment) || 0)} />
+                  <div className="relative group">
+                    <MetricCard
+                      label="Advance Payment"
+                      value={fmt(selectedBalance.advance_payment)}
+                      color="green"
+                      prefix="Rs. "
+                      words={numberToWords(Number(selectedBalance.advance_payment) || 0)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setClearAdvanceOpen(true)}
+                      className="absolute top-2.5 right-2.5 text-[10px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800 border border-rose-200 rounded-md px-2 py-0.5 flex items-center gap-1 shadow-sm cursor-pointer transition-all"
+                      title="Remove Advance Payment (Reset to Rs. 0)"
+                    >
+                      <Trash2 className="size-3 text-rose-500" />
+                      Remove
+                    </button>
+                  </div>
                 )}
                 <MetricCard label="Balance Due" value={fmt(selectedBalance.balance_due)} color="orange" prefix="Rs. " words={numberToWords(selectedBalance.balance_due)} />
               </div>
@@ -1371,6 +1419,18 @@ export default function CustomerKhataPage() {
           </div>
         )}
       </section>
+
+      {/* Confirm Remove Advance Payment Dialog */}
+      <ConfirmAction
+        open={clearAdvanceOpen}
+        onOpenChange={setClearAdvanceOpen}
+        title={`Remove Advance Payment — ${selectedCustomer?.name}`}
+        description={`Kya aap ${selectedCustomer?.name} ka Rs. ${fmt(selectedBalance?.advance_payment)} advance payment remove karke Rs. 0 karna chahte hain? Is se customer ka balance due Rs. ${fmt(selectedBalance?.advance_payment)} barh jayega.`}
+        confirmLabel="Remove Advance (Set to 0)"
+        variant="danger"
+        onConfirm={handleRemoveAdvance}
+        loading={clearingAdvance}
+      />
     </div>
   );
 }

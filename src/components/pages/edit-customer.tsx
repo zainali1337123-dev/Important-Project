@@ -54,10 +54,11 @@ export default function EditCustomerPage() {
   const [balances, setBalances] = useState<Record<number, BalanceRow>>({});
   const [loading, setLoading] = useState(true);
 
-  // ── Selected customer + edited OB ──
+  // ── Selected customer + edited OB and Advance ──
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [search, setSearch] = useState("");
   const [newOb, setNewOb] = useState<string>("");
+  const [newAdv, setNewAdv] = useState<string>("");
 
   // ── Confirm dialog state ──
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -100,34 +101,61 @@ export default function EditCustomerPage() {
     [selectedCustomerId, balances]
   );
 
-  // When a customer is selected, pre-fill the OB input with their current value
+  // When a customer is selected, pre-fill both OB and Advance inputs with current values
   const handleSelectCustomer = (id: string) => {
     setSelectedCustomerId(id);
     const c = customers.find((x) => String(x.id) === id);
     if (c) {
       setNewOb(String(c.opening_balance ?? 0));
+      setNewAdv(String(c.advance_payment ?? 0));
     } else {
       setNewOb("");
+      setNewAdv("");
     }
   };
 
-  // Has the user changed the value from the saved one?
+  // Has the user changed the values from saved?
   const savedOb = selectedCustomer?.opening_balance ?? 0;
   const newObNum = parseFloat(newOb) || 0;
   const obChanged = selectedCustomer !== null && Math.abs(newObNum - savedOb) > 0.001;
-  const obDiff = newObNum - savedOb; // positive = will increase balance due
+  const obDiff = newObNum - savedOb;
 
-  // Predicted new balance_due after OB update
+  const savedAdv = selectedCustomer?.advance_payment ?? 0;
+  const newAdvNum = parseFloat(newAdv) || 0;
+  const advChanged = selectedCustomer !== null && Math.abs(newAdvNum - savedAdv) > 0.001;
+  const advDiff = newAdvNum - savedAdv;
+
+  const hasChanged = obChanged || advChanged;
+
+  // Predicted new balance_due after OB and Advance updates
   const predictedBalanceDue = useMemo(() => {
     if (!selectedBalance) return 0;
     // balance_due = opening_balance + total_bill - cash_paid - goods_value - advance_payment
-    // We just swap the old OB for the new one.
     const totalBill = selectedBalance.total_bill ?? 0;
     const cashPaid = selectedBalance.total_cash_paid ?? 0;
     const goods = selectedBalance.total_goods_value ?? 0;
-    const advance = selectedBalance.advance_payment ?? 0;
-    return newObNum + totalBill - cashPaid - goods - advance;
-  }, [selectedBalance, newObNum]);
+    return newObNum + totalBill - cashPaid - goods - newAdvNum;
+  }, [selectedBalance, newObNum, newAdvNum]);
+
+  // Quick 1-click clear advance payment directly from table or card
+  const handleQuickClearAdvance = async (cust: Customer) => {
+    try {
+      const res = await fetch("/api/customers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: cust.id, advance_payment: 0 }),
+      });
+      if (!res.ok) throw new Error(await apiError(res, "Failed to clear advance payment"));
+      invalidateCache("customers");
+      toast.success(`Advance payment removed for ${cust.name}. Reset to Rs. 0.`);
+      await loadData();
+      if (String(cust.id) === selectedCustomerId) {
+        setNewAdv("0");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to clear advance payment");
+    }
+  };
 
   // ────────────────────────────────────────────────────────────
   // Filtered dropdown list
@@ -150,7 +178,7 @@ export default function EditCustomerPage() {
       toast.error("Pehle ek customer select karein.");
       return;
     }
-    if (!obChanged) {
+    if (!hasChanged) {
       toast.info("Value same hai — kuch change nahi hua. Edit karke phir try karein.");
       return;
     }
@@ -158,11 +186,15 @@ export default function EditCustomerPage() {
       toast.error("Opening balance 0 ya us se zyada honi chahiye.");
       return;
     }
+    if (newAdvNum < 0) {
+      toast.error("Advance payment 0 ya us se zyada honi chahiye.");
+      return;
+    }
     setConfirmOpen(true);
   };
 
   // ────────────────────────────────────────────────────────────
-  // Actually persist the OB update (called after confirm)
+  // Actually persist the OB + Advance update (called after confirm)
   // ────────────────────────────────────────────────────────────
   const handleConfirmSave = async () => {
     if (!selectedCustomer) return;
@@ -174,16 +206,21 @@ export default function EditCustomerPage() {
         body: JSON.stringify({
           id: selectedCustomer.id,
           opening_balance: newObNum,
+          advance_payment: newAdvNum,
         }),
       });
       if (!res.ok) {
-        throw new Error(await apiError(res, "Failed to update opening balance"));
+        throw new Error(await apiError(res, "Failed to update customer balance"));
       }
       const data = await res.json();
-      // Update local customer list so the table + dropdown reflect the new OB
+      // Update local customer list so the table + dropdown reflect the new values
       if (data?.customer) {
         setCustomers((prev) =>
-          prev.map((c) => (c.id === selectedCustomer.id ? { ...c, opening_balance: newObNum } : c))
+          prev.map((c) =>
+            c.id === selectedCustomer.id
+              ? { ...c, opening_balance: newObNum, advance_payment: newAdvNum }
+              : c
+          )
         );
       }
       // Also update the balances map so the predicted/preview numbers refresh
@@ -191,6 +228,7 @@ export default function EditCustomerPage() {
         const updatedBal: BalanceRow = {
           ...selectedBalance,
           opening_balance: newObNum,
+          advance_payment: newAdvNum,
           balance_due: predictedBalanceDue,
         };
         setBalances((prev) => ({ ...prev, [selectedCustomer.id]: updatedBal }));
@@ -198,15 +236,15 @@ export default function EditCustomerPage() {
       // Invalidate cached customer list so other pages pick up the change
       invalidateCache("customers");
       toast.success(
-        `Opening balance updated for ${selectedCustomer.name}`,
+        `Balance updated for ${selectedCustomer.name}`,
         {
-          description: `Rs. ${fmt(savedOb)} → Rs. ${fmt(newObNum)} (${obDiff >= 0 ? "+" : ""}Rs. ${fmt(obDiff)})`,
+          description: `OB: Rs. ${fmt(newObNum)} | Advance: Rs. ${fmt(newAdvNum)}`,
           duration: 6000,
         }
       );
       setConfirmOpen(false);
     } catch (e: any) {
-      toast.error(e.message || "Failed to update opening balance");
+      toast.error(e.message || "Failed to update customer balance");
     } finally {
       setConfirmLoading(false);
     }
@@ -308,7 +346,7 @@ export default function EditCustomerPage() {
 
               {/* Current vs New side-by-side */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Current */}
+                {/* Opening Balance Current */}
                 <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 space-y-2">
                   <div className="text-[10px] uppercase tracking-wider text-amber-700 font-bold">
                     Current Opening Balance
@@ -321,7 +359,7 @@ export default function EditCustomerPage() {
                   </div>
                 </div>
 
-                {/* New */}
+                {/* Opening Balance New */}
                 <div className={cn(
                   "rounded-lg border p-4 space-y-2 transition-colors",
                   obChanged ? "border-blue-300 bg-blue-50/60" : "border-slate-200 bg-white"
@@ -345,6 +383,62 @@ export default function EditCustomerPage() {
                   />
                   <div className="text-[0.65rem] text-slate-500 capitalize">
                     {newObNum > 0 ? numberToWords(newObNum) : "zero"}
+                  </div>
+                </div>
+
+                {/* Advance Payment Current */}
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-bold">
+                      Current Advance Payment (پیشگی)
+                    </div>
+                    {savedAdv > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleQuickClearAdvance(selectedCustomer)}
+                        className="text-[10px] font-bold text-rose-600 hover:text-rose-800 underline cursor-pointer"
+                        title="Database se advance payment 0 karein"
+                      >
+                        Remove Advance (Set to 0)
+                      </button>
+                    )}
+                  </div>
+                  <div className="text-2xl font-extrabold text-emerald-900 tabular-nums">
+                    Rs. {fmt(savedAdv)}
+                  </div>
+                  <div className="text-[0.65rem] text-emerald-700/80 capitalize">
+                    {savedAdv > 0 ? numberToWords(savedAdv) : "zero (no advance)"}
+                  </div>
+                </div>
+
+                {/* Advance Payment New */}
+                <div className={cn(
+                  "rounded-lg border p-4 space-y-2 transition-colors",
+                  advChanged ? "border-emerald-300 bg-emerald-50/40" : "border-slate-200 bg-white"
+                )}>
+                  <div className="text-[10px] uppercase tracking-wider text-slate-600 font-bold flex items-center justify-between">
+                    <span>New Advance Payment</span>
+                    {newAdvNum > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setNewAdv("0")}
+                        className="text-[10px] font-semibold text-rose-600 hover:text-rose-700 underline cursor-pointer"
+                      >
+                        Reset to 0
+                      </button>
+                    )}
+                  </div>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="100"
+                    placeholder="0"
+                    value={newAdv}
+                    onChange={(e) => setNewAdv(e.target.value)}
+                    className="text-lg font-bold tabular-nums"
+                  />
+                  <div className="text-[0.65rem] text-slate-500 capitalize">
+                    {newAdvNum > 0 ? numberToWords(newAdvNum) : "zero"}
                   </div>
                 </div>
               </div>
@@ -371,7 +465,7 @@ export default function EditCustomerPage() {
                     </div>
                     <div>
                       <div className="text-[10px] uppercase text-slate-400">Advance Payment</div>
-                      <div className="font-semibold text-emerald-700 tabular-nums">Rs. {fmt(selectedBalance.advance_payment ?? 0)}</div>
+                      <div className="font-semibold text-emerald-700 tabular-nums">Rs. {fmt(newAdvNum)}</div>
                     </div>
                     <div>
                       <div className="text-[10px] uppercase text-slate-400">Current Balance Due</div>
@@ -383,7 +477,7 @@ export default function EditCustomerPage() {
                     <div className="flex items-center gap-2 text-xs uppercase tracking-wider font-semibold">
                       Predicted Balance Due
                       <span className="text-[10px] text-slate-300 normal-case font-normal tracking-normal">
-                        (new OB + bill − cash − goods − advance)
+                        (new OB + bill − cash − goods − new advance)
                       </span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -391,7 +485,7 @@ export default function EditCustomerPage() {
                       <ArrowRight className="size-3.5 text-slate-400" />
                       <span className={cn(
                         "text-lg font-extrabold tabular-nums",
-                        obDiff >= 0 ? "text-red-300" : "text-emerald-300"
+                        predictedBalanceDue > selectedBalance.balance_due ? "text-red-300" : "text-emerald-300"
                       )}>
                         Rs. {fmt(predictedBalanceDue)}
                       </span>
@@ -406,23 +500,24 @@ export default function EditCustomerPage() {
                   variant="outline"
                   onClick={() => {
                     setNewOb(String(savedOb));
-                    toast.info("OB reset to saved value.");
+                    setNewAdv(String(savedAdv));
+                    toast.info("Values reset to saved values.");
                   }}
-                  disabled={!obChanged}
+                  disabled={!hasChanged}
                   className="cursor-pointer"
                 >
                   Reset to Saved
                 </Button>
                 <Button
                   onClick={handleSaveClick}
-                  disabled={!obChanged}
+                  disabled={!hasChanged}
                   className={cn(
                     "cursor-pointer",
-                    obChanged ? "bg-blue-600 hover:bg-blue-700 text-white" : ""
+                    hasChanged ? "bg-blue-600 hover:bg-blue-700 text-white" : ""
                   )}
                 >
                   <Save className="size-4 mr-2" />
-                  Save Opening Balance
+                  Save Balance Changes
                 </Button>
               </div>
             </div>
@@ -464,6 +559,7 @@ export default function EditCustomerPage() {
                     <th className="text-left text-xs uppercase text-slate-500 font-semibold px-4 py-3">Customer</th>
                     <th className="text-left text-xs uppercase text-slate-500 font-semibold px-4 py-3">Type</th>
                     <th className="text-right text-xs uppercase text-slate-500 font-semibold px-4 py-3">Opening Balance</th>
+                    <th className="text-right text-xs uppercase text-slate-500 font-semibold px-4 py-3">Advance Payment</th>
                     <th className="text-right text-xs uppercase text-slate-500 font-semibold px-4 py-3">Balance Due</th>
                     <th className="text-right text-xs uppercase text-slate-500 font-semibold px-4 py-3">Action</th>
                   </tr>
@@ -475,6 +571,7 @@ export default function EditCustomerPage() {
                       const b = balances[c.id];
                       const due = b?.balance_due ?? c.opening_balance ?? 0;
                       const ob = c.opening_balance ?? 0;
+                      const adv = c.advance_payment ?? 0;
                       const isSelected = String(c.id) === selectedCustomerId;
                       return (
                         <tr
@@ -500,6 +597,24 @@ export default function EditCustomerPage() {
                               <span className="text-slate-300">—</span>
                             )}
                           </td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {adv > 0 ? (
+                              <div className="flex items-center justify-end gap-1.5">
+                                <span className="font-semibold text-emerald-700">Rs. {fmt(adv)}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleQuickClearAdvance(c)}
+                                  className="h-6 px-1.5 text-[10px] text-rose-600 hover:text-rose-700 hover:bg-rose-50 cursor-pointer"
+                                  title="Remove Advance (Set to 0)"
+                                >
+                                  Clear
+                                </Button>
+                              </div>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3 text-right tabular-nums font-semibold">
                             Rs. {fmt(due)}
                           </td>
@@ -509,10 +624,10 @@ export default function EditCustomerPage() {
                               size="sm"
                               onClick={() => handleSelectCustomer(String(c.id))}
                               className="cursor-pointer text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                              title="Edit opening balance"
+                              title="Edit opening balance / advance"
                             >
                               <UserPen className="size-3.5 mr-1" />
-                              Edit OB
+                              Edit
                             </Button>
                           </td>
                         </tr>
@@ -529,13 +644,13 @@ export default function EditCustomerPage() {
       <ConfirmAction
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title="Opening Balance Update Karo?"
+        title="Customer Balance Settings Update Karein?"
         description={
           selectedCustomer
-            ? `${selectedCustomer.name} ka opening balance Rs. ${fmt(savedOb)} se Rs. ${fmt(newObNum)} (${obDiff >= 0 ? "+" : ""}Rs. ${fmt(obDiff)}) kar diya jayega. Is se customer ki Balance Due bhi update ho jayegi. Ye operation permanent hai, lekin aap kabhi bhi isi page se value wapas change kar sakte hain.`
+            ? `${selectedCustomer.name} ka balance record update kiya jayega: Opening Balance: Rs. ${fmt(newObNum)}, Advance Payment: Rs. ${fmt(newAdvNum)}. Nayi Balance Due Rs. ${fmt(predictedBalanceDue)} hogi.`
             : ""
         }
-        confirmLabel="Haan, Update Karo"
+        confirmLabel="Haan, Update Karein"
         variant="warning"
         onConfirm={handleConfirmSave}
         loading={confirmLoading}
